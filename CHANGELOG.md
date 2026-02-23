@@ -35,6 +35,12 @@
 - Replaced `Logger._commandStartTimes` Map keyed by `Date.now()` with incrementing counter to avoid key collisions
 
 ### Added
+- Added Vitest test suite with 42 tests across 5 test files (ADR-014)
+  - `changeModeParser`: markdown/legacy format parsing, validation
+  - `changeModeChunker`: empty input, single/multi-chunk splits, custom limits
+  - `changeModeTranslator`: single/multi-chunk formatting, summarization
+  - `registry`: tool execution, Zod validation errors, prompt formatting
+  - Smoke test: verifies all 3 tools registered with required properties
 - Updated default models to `gemini-3.1-pro-preview` (Pro) and `gemini-3-flash-preview` (Flash)
 - Fixed quota fallback to match on `RESOURCE_EXHAUSTED` instead of model-specific string (works for any model generation)
 - Configured Biome v2.4.4 for linting and formatting (`biome.json`)

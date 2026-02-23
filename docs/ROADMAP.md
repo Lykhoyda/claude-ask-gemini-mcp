@@ -16,7 +16,7 @@
 ## Priority 3: Open Issues
 - [ ] Allow model configuration via MCP JSON settings (upstream Issue #49)
 - [ ] Fix excessive token responses for small prompts (upstream Issues #6, #26)
-- [ ] Add automated test suite
+- [x] Add automated test suite (Vitest, 42 tests, ADR-014)
 - [x] Set up linter and formatter (Biome v2.4.4)
 
 ## Completed

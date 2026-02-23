@@ -89,3 +89,10 @@
 - **Context:** Node.js 18 reached End-of-Life in April 2025. The project previously required >=18.0.0. Active LTS versions are Node.js 20 (LTS until April 2026) and Node.js 22 (LTS until April 2027). Supporting EOL runtimes increases maintenance burden and security risk with no benefit — users on Node 18 are already past its support window.
 - **Decision:** Raise `engines.node` to `>=20.0.0`. Update CI matrix to test only Node 20 and 22 (drop 18). Update all documentation references. Adopt an LTS-only policy going forward.
 - **Consequences:** Users on Node.js 18 will see an engine compatibility warning from npm. CI runs faster with fewer matrix entries. The project stays on supported, security-patched runtimes.
+
+## ADR-014: Add Vitest Test Suite
+- **Date:** 2026-02-23
+- **Status:** Accepted
+- **Context:** The project had zero test infrastructure — no test runner, no test files, and a placeholder `npm test` script. The codebase has several pure utility modules (changeModeParser, changeModeChunker, changeModeTranslator) ideal for unit testing without mocking. The project is native ESM (`"type": "module"`, `"module": "Node16"`), which makes Jest painful (requires `--experimental-vm-modules` workarounds).
+- **Decision:** Use Vitest as the test runner — it handles ESM natively and `tsx` is already a devDependency. Start with pure-function unit tests (no mocking) for the three changeMode utilities, registry tests using lightweight stub tools, and a smoke test verifying tool registration. Defer mocking-heavy tests (commandExecutor, chunkCache, geminiExecutor) and E2E tests to future iterations.
+- **Consequences:** 42 tests across 5 test files provide baseline coverage for the most logic-dense modules. `npm test` now runs `vitest run` instead of a no-op. Test infrastructure is in place for incremental coverage expansion.

@@ -83,7 +83,7 @@ You must restart Claude Desktop ***completely*** for changes to take effect.
 :::
 ## Other MCP Clients
 
-Gemini MCP Tool works with 40+ MCP clients! Here are the common configuration patterns:
+Ask Gemini MCP works with 40+ MCP clients! Here are the common configuration patterns:
 
 ### STDIO Transport (Most Common)
 ```json
@@ -164,7 +164,7 @@ These tools are registered via MCP and can be used through natural language:
 
 ## Need a Different Client?
 
-Don't see your MCP client listed? Gemini MCP Tool uses standard MCP protocol and works with any compatible client.
+Don't see your MCP client listed? Ask Gemini MCP uses the standard MCP protocol and works with any compatible client.
 
 ::: tip Find More MCP Clients
 - **Official List**: [modelcontextprotocol.io/clients](https://modelcontextprotocol.io/clients)
@@ -203,3 +203,25 @@ Now that you're set up:
 ::: info Need Help?
 If you run into issues, [open an issue](https://github.com/Lykhoyda/ask-gemini-mcp/issues) on GitHub.
 :::
+
+## Advanced Configuration (Environment Variables)
+
+You can configure the behavior of the server using environment variables in your MCP client's configuration block.
+
+| Variable | Default | Description |
+|---|---|---|
+| `GMCPT_LOG_LEVEL` | `warn` | Minimum log level to output to `stderr`. Valid options: `debug`, `info`, `warn`, `error`. Increase to `debug` if you need to troubleshoot connection issues. |
+| `GMCPT_TIMEOUT_MS` | `300000` | The maximum amount of time (in milliseconds) before the server assumes the Gemini CLI process has hung and forcibly terminates it. Defaults to 5 minutes. |
+
+**Example (Warp):**
+```json
+{
+  "gemini-cli": {
+    "command": "npx",
+    "args": ["-y", "ask-gemini-mcp"],
+    "env": {
+      "GMCPT_LOG_LEVEL": "debug"
+    }
+  }
+}
+```

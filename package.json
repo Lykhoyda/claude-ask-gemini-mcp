@@ -11,7 +11,8 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc && node dist/index.js",
-    "test": "echo \"No tests yet\" && exit 0",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "biome check src/ && tsc --noEmit",
     "format": "biome format --write src/",
     "format:check": "biome format src/",
@@ -60,7 +61,8 @@
     "tsx": "^4.0.0",
     "typescript": "^5.0.0",
     "vitepress": "^1.6.3",
-    "vitepress-plugin-mermaid": "^2.0.17"
+    "vitepress-plugin-mermaid": "^2.0.17",
+    "vitest": "^4.0.18"
   },
   "publishConfig": {
     "access": "public"
