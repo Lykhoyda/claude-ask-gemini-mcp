@@ -9,7 +9,7 @@ The core tool — sends prompts to Gemini CLI for analysis, code review, or gene
 
 **Parameters:**
 - `prompt` (required): The question or analysis request. Use `@` syntax to include files.
-- `model` (optional): Gemini model to use (`gemini-2.5-pro` or `gemini-2.5-flash`).
+- `model` (optional): Gemini model to use (`gemini-3.1-pro-preview` or `gemini-3-flash-preview`).
 - `sandbox` (optional): Set to `true` to run in Gemini's sandbox mode (`-s` flag).
 - `changeMode` (optional): Set to `true` for structured edit responses.
 

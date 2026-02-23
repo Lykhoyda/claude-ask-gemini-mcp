@@ -14,7 +14,7 @@ const askGeminiArgsSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Optional model to use (e.g., 'gemini-2.5-flash'). If not specified, uses the default model (gemini-2.5-pro).",
+      "Optional model to use (e.g., 'gemini-3-flash-preview'). If not specified, uses the default model (gemini-3.1-pro-preview).",
     ),
   sandbox: z
     .boolean()
