@@ -31,6 +31,15 @@
 - Removed dead code: `Logger.log()`, `summarizeChunking`, `getCacheStats`, `clearCache`, `sendStatusMessage`
 - Replaced `Logger._commandStartTimes` Map keyed by `Date.now()` with incrementing counter to avoid key collisions
 
+### Added
+- Configured Biome v2.4.4 for linting and formatting (`biome.json`)
+- Added npm scripts: `format`, `format:check`, `check` (Biome) alongside existing `lint` (now Biome + tsc)
+- Enforced `useImportType` rule to ensure explicit type imports per project convention
+- Normalized all source files: double quotes, trailing commas, 2-space indent, 120 line width
+- Added `node:` protocol to Node.js builtin imports
+- Replaced `while ((match = regex.exec(...)))` patterns with explicit reassignment to satisfy `noAssignInExpressions`
+- Fixed `noExplicitAny` in `fetch-chunk.tool.ts` by using Zod schema inference
+
 ### Removed
 - Removed non-core tools: `brainstorm`, `help`, `timeout-test` (ADR-004). Server now exposes only `ask-gemini`, `fetch-chunk`, and `ping`
 - Deleted orphaned tool source files (`brainstorm.tool.ts`, `timeout-test.tool.ts`, `test-tool.example.ts`)

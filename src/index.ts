@@ -2,14 +2,13 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import type { CallToolResult, ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import { z } from "zod";
-import { Logger } from "./utils/logger.js";
-import { PROTOCOL } from "./constants.js";
+import type { CallToolResult, ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
+import type { z } from "zod";
 import type { ToolArguments } from "./constants.js";
-
-import { toolRegistry, executeTool, getPromptMessage } from "./tools/index.js";
+import { PROTOCOL } from "./constants.js";
+import { executeTool, getPromptMessage, toolRegistry } from "./tools/index.js";
+import { Logger } from "./utils/logger.js";
 
 type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
@@ -22,12 +21,7 @@ let isProcessing = false;
 let currentOperationName = "";
 let latestOutput = "";
 
-async function sendProgressNotification(
-  extra: ToolExtra,
-  progress: number,
-  total?: number,
-  message?: string
-) {
+async function sendProgressNotification(extra: ToolExtra, progress: number, total?: number, message?: string) {
   const progressToken = extra._meta?.progressToken;
   if (!progressToken) return;
 
@@ -68,9 +62,7 @@ function startProgressUpdates(operationName: string, extra: ToolExtra) {
       progress += 1;
       const baseMessage = progressMessages[messageIndex % progressMessages.length];
       const outputPreview = latestOutput.slice(-150).trim();
-      const message = outputPreview
-        ? `${baseMessage}\nOutput: ...${outputPreview}`
-        : baseMessage;
+      const message = outputPreview ? `${baseMessage}\nOutput: ...${outputPreview}` : baseMessage;
 
       await sendProgressNotification(extra, progress, undefined, message);
       messageIndex++;
@@ -82,11 +74,7 @@ function startProgressUpdates(operationName: string, extra: ToolExtra) {
   return { interval: progressInterval };
 }
 
-function stopProgressUpdates(
-  progressData: { interval: NodeJS.Timeout },
-  extra: ToolExtra,
-  success: boolean = true
-) {
+function stopProgressUpdates(progressData: { interval: NodeJS.Timeout }, extra: ToolExtra, success: boolean = true) {
   const operationName = currentOperationName;
   isProcessing = false;
   currentOperationName = "";
@@ -96,7 +84,7 @@ function stopProgressUpdates(
     extra,
     100,
     100,
-    success ? `${operationName} completed successfully` : `${operationName} failed`
+    success ? `${operationName} completed successfully` : `${operationName} failed`,
   );
 }
 
@@ -136,7 +124,7 @@ for (const tool of toolRegistry) {
           isError: true,
         };
       }
-    }
+    },
   );
 }
 
@@ -144,19 +132,17 @@ for (const tool of toolRegistry) {
 for (const tool of toolRegistry) {
   if (!tool.prompt) continue;
 
-  server.registerPrompt(
-    tool.name,
-    { description: tool.prompt.description },
-    async (args: Record<string, string>) => {
-      const promptMessage = getPromptMessage(tool.name, args);
-      return {
-        messages: [{
+  server.registerPrompt(tool.name, { description: tool.prompt.description }, async (args: Record<string, string>) => {
+    const promptMessage = getPromptMessage(tool.name, args);
+    return {
+      messages: [
+        {
           role: "user" as const,
           content: { type: "text" as const, text: promptMessage },
-        }],
-      };
-    }
-  );
+        },
+      ],
+    };
+  });
 }
 
 async function main() {

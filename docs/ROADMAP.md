@@ -17,6 +17,7 @@
 - [ ] Allow model configuration via MCP JSON settings (upstream Issue #49)
 - [ ] Fix excessive token responses for small prompts (upstream Issues #6, #26)
 - [ ] Add automated test suite
+- [x] Set up linter and formatter (Biome v2.4.4)
 
 ## Completed
 - [x] Remove non-core tools (`brainstorm`, `help`, `timeout-test`) per ADR-004

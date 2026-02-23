@@ -1,6 +1,6 @@
-import { spawn } from "child_process";
-import { Logger } from "./logger.js";
+import { spawn } from "node:child_process";
 import { EXECUTION } from "../constants.js";
+import { Logger } from "./logger.js";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -18,7 +18,7 @@ function getTimeoutMs(): number {
 export async function executeCommand(
   command: string,
   args: string[],
-  onProgress?: (newOutput: string) => void
+  onProgress?: (newOutput: string) => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const commandId = Logger.commandExecution(command, args);
@@ -64,14 +64,14 @@ export async function executeCommand(
         const reason = reasonMatch ? reasonMatch[1] : "rateLimitExceeded";
         const errorJson = {
           error: {
-            code: parseInt(status),
+            code: parseInt(status, 10),
             message: `GMCPT: --> Quota exceeded for ${model}`,
             details: {
               model: model,
               reason: reason,
               statusText: "Too Many Requests -- > try using gemini-2.5-flash by asking",
-            }
-          }
+            },
+          },
         };
         Logger.error(`Gemini Quota Error: ${JSON.stringify(errorJson, null, 2)}`);
       }
@@ -98,9 +98,7 @@ export async function executeCommand(
           Logger.commandComplete(commandId, code);
           Logger.error(`Failed with exit code ${code}`);
           const errorMessage = stderr.trim() || "Unknown error";
-          reject(
-            new Error(`Command failed with exit code ${code}: ${errorMessage}`),
-          );
+          reject(new Error(`Command failed with exit code ${code}: ${errorMessage}`));
         }
       }
     });

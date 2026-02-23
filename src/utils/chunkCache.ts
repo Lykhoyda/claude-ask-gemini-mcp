@@ -1,9 +1,9 @@
-import { createHash } from 'crypto';
-import type { EditChunk } from './changeModeChunker.js';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { Logger } from './logger.js';
+import { createHash } from "node:crypto";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import type { EditChunk } from "./changeModeChunker.js";
+import { Logger } from "./logger.js";
 
 interface CacheEntry {
   chunks: EditChunk[];
@@ -11,7 +11,7 @@ interface CacheEntry {
   promptHash: string;
 }
 
-const CACHE_DIR = path.join(os.tmpdir(), 'gemini-mcp-chunks');
+const CACHE_DIR = path.join(os.tmpdir(), "gemini-mcp-chunks");
 const CACHE_TTL = 10 * 60 * 1000;
 const MAX_CACHE_FILES = 50;
 
@@ -30,19 +30,19 @@ function ensureCacheDir(): void {
 export function cacheChunks(prompt: string, chunks: EditChunk[]): string {
   ensureCacheDir();
   cleanExpiredFiles(); // Cleanup on each write
-  
+
   // Generate deterministic cache key from prompt
-  const promptHash = createHash('sha256').update(prompt).digest('hex');
+  const promptHash = createHash("sha256").update(prompt).digest("hex");
   const cacheKey = promptHash.slice(0, 8);
   const filePath = path.join(CACHE_DIR, `${cacheKey}.json`);
-  
+
   // Store with metadata
   const cacheData: CacheEntry = {
     chunks,
     timestamp: Date.now(),
-    promptHash
+    promptHash,
   };
-  
+
   try {
     fs.writeFileSync(filePath, JSON.stringify(cacheData));
     Logger.debug(`Cached ${chunks.length} chunks to file: ${cacheKey}.json`);
@@ -60,19 +60,20 @@ export function cacheChunks(prompt: string, chunks: EditChunk[]): string {
  */
 export function getChunks(cacheKey: string): EditChunk[] | null {
   const filePath = path.join(CACHE_DIR, `${cacheKey}.json`);
-  
+
   try {
     if (!fs.existsSync(filePath)) {
       return null;
     }
-    
-    const fileContent = fs.readFileSync(filePath, 'utf-8');
+
+    const fileContent = fs.readFileSync(filePath, "utf-8");
     const data: unknown = JSON.parse(fileContent);
 
     if (
-      typeof data !== 'object' || data === null ||
+      typeof data !== "object" ||
+      data === null ||
       !Array.isArray((data as CacheEntry).chunks) ||
-      typeof (data as CacheEntry).timestamp !== 'number'
+      typeof (data as CacheEntry).timestamp !== "number"
     ) {
       Logger.debug(`Cache file for ${cacheKey} has invalid shape, deleting`);
       fs.unlinkSync(filePath);
@@ -86,7 +87,7 @@ export function getChunks(cacheKey: string): EditChunk[] | null {
       Logger.debug(`Cache expired for ${cacheKey}, deleted file`);
       return null;
     }
-    
+
     Logger.debug(`Cache hit for ${cacheKey}, returning ${entry.chunks.length} chunks`);
     return entry.chunks;
   } catch (error) {
@@ -104,10 +105,10 @@ function cleanExpiredFiles(): void {
     const files = fs.readdirSync(CACHE_DIR);
     const now = Date.now();
     let cleaned = 0;
-    
+
     for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      
+      if (!file.endsWith(".json")) continue;
+
       const filePath = path.join(CACHE_DIR, file);
       try {
         const stats = fs.statSync(filePath);
@@ -120,7 +121,7 @@ function cleanExpiredFiles(): void {
         Logger.debug(`Error checking file ${file}: ${error}`);
       }
     }
-    
+
     if (cleaned > 0) {
       Logger.debug(`Cleaned ${cleaned} expired cache files`);
     }
@@ -130,18 +131,18 @@ function cleanExpiredFiles(): void {
   }
 }
 
-
 function enforceFileLimits(): void {
   try {
-    const files = fs.readdirSync(CACHE_DIR)
-      .filter(f => f.endsWith('.json'))
-      .map(f => ({
+    const files = fs
+      .readdirSync(CACHE_DIR)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => ({
         name: f,
         path: path.join(CACHE_DIR, f),
-        mtime: fs.statSync(path.join(CACHE_DIR, f)).mtimeMs
+        mtime: fs.statSync(path.join(CACHE_DIR, f)).mtimeMs,
       }))
       .sort((a, b) => a.mtime - b.mtime); // Oldest first
-    
+
     // Remove oldest files if over limit
     if (files.length > MAX_CACHE_FILES) {
       const toRemove = files.slice(0, files.length - MAX_CACHE_FILES);
@@ -156,4 +157,3 @@ function enforceFileLimits(): void {
     Logger.debug(`Error enforcing file limits: ${error}`);
   }
 }
-

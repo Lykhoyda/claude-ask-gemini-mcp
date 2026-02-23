@@ -1,6 +1,6 @@
-import { z } from 'zod';
-import type { UnifiedTool } from './registry.js';
-import { executeCommand } from '../utils/commandExecutor.js';
+import { z } from "zod";
+import { executeCommand } from "../utils/commandExecutor.js";
+import type { UnifiedTool } from "./registry.js";
 
 const pingArgsSchema = z.object({
   message: z.string().optional().describe("A message to echo back to test the connection"),
@@ -13,9 +13,9 @@ export const pingTool: UnifiedTool = {
   prompt: {
     description: "Echo test message to verify MCP server is working",
   },
-  category: 'simple',
+  category: "simple",
   execute: async (args, onProgress) => {
     const message = args.message || "Pong from Gemini MCP Server!";
     return executeCommand("echo", [message], onProgress);
-  }
+  },
 };

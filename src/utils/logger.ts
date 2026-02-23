@@ -1,4 +1,4 @@
-import { LOG_PREFIX, LOG_LEVEL_ENV_VAR } from "../constants.js";
+import { LOG_LEVEL_ENV_VAR, LOG_PREFIX } from "../constants.js";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -31,46 +31,48 @@ export class Logger {
 
   static warn(message: string, ...args: unknown[]): void {
     if (!shouldLog("warn")) return;
-    console.warn(this.formatMessage(message), ...args);
+    console.warn(Logger.formatMessage(message), ...args);
   }
 
   static error(message: string, ...args: unknown[]): void {
     if (!shouldLog("error")) return;
-    console.error(this.formatMessage(message), ...args);
+    console.error(Logger.formatMessage(message), ...args);
   }
 
   static debug(message: string, ...args: unknown[]): void {
     if (!shouldLog("debug")) return;
-    console.warn(this.formatMessage(message), ...args);
+    console.warn(Logger.formatMessage(message), ...args);
   }
 
   static info(message: string, ...args: unknown[]): void {
     if (!shouldLog("info")) return;
-    console.warn(this.formatMessage(message), ...args);
+    console.warn(Logger.formatMessage(message), ...args);
   }
 
   static toolInvocation(toolName: string, args: unknown): void {
-    this.warn(`Tool "${toolName}" raw args:`, JSON.stringify(args, null, 2));
+    Logger.warn(`Tool "${toolName}" raw args:`, JSON.stringify(args, null, 2));
   }
 
   static toolParsedArgs(prompt: string, model?: string, sandbox?: boolean, changeMode?: boolean): void {
-    this.warn(`Parsed prompt: "${prompt}"\nmodel: ${model ?? "default"}, sandbox: ${sandbox ?? false}, changeMode: ${changeMode ?? false}`);
+    Logger.warn(
+      `Parsed prompt: "${prompt}"\nmodel: ${model ?? "default"}, sandbox: ${sandbox ?? false}, changeMode: ${changeMode ?? false}`,
+    );
   }
 
   static commandExecution(command: string, args: string[]): number {
-    const commandId = this._nextCommandId++;
-    this._commandStartTimes.set(commandId, Date.now());
-    this.warn(`[cmd:${commandId}] Starting: ${command} ${args.map((arg) => `"${arg}"`).join(" ")}`);
+    const commandId = Logger._nextCommandId++;
+    Logger._commandStartTimes.set(commandId, Date.now());
+    Logger.warn(`[cmd:${commandId}] Starting: ${command} ${args.map((arg) => `"${arg}"`).join(" ")}`);
     return commandId;
   }
 
   static commandComplete(commandId: number, exitCode: number | null, outputLength?: number): void {
-    const startTime = this._commandStartTimes.get(commandId);
+    const startTime = Logger._commandStartTimes.get(commandId);
     const elapsed = startTime ? ((Date.now() - startTime) / 1000).toFixed(1) : "?";
-    this.warn(`[cmd:${commandId}] [${elapsed}s] Process finished with exit code: ${exitCode}`);
+    Logger.warn(`[cmd:${commandId}] [${elapsed}s] Process finished with exit code: ${exitCode}`);
     if (outputLength !== undefined) {
-      this.warn(`[cmd:${commandId}] Response: ${outputLength} chars`);
+      Logger.warn(`[cmd:${commandId}] Response: ${outputLength} chars`);
     }
-    this._commandStartTimes.delete(commandId);
+    Logger._commandStartTimes.delete(commandId);
   }
 }

@@ -1,4 +1,4 @@
-import type { ChangeModeEdit } from './changeModeParser.js';
+import type { ChangeModeEdit } from "./changeModeParser.js";
 
 export interface EditChunk {
   edits: ChangeModeEdit[];
@@ -9,7 +9,8 @@ export interface EditChunk {
 }
 
 function estimateEditSize(edit: ChangeModeEdit): number {
-  const jsonOverhead = 250; const contentSize = edit.filename.length * 2 + edit.oldCode.length + edit.newCode.length;
+  const jsonOverhead = 250;
+  const contentSize = edit.filename.length * 2 + edit.oldCode.length + edit.newCode.length;
   return jsonOverhead + contentSize;
 }
 
@@ -22,20 +23,17 @@ function groupEditsByFile(edits: ChangeModeEdit[]): Map<string, ChangeModeEdit[]
   }
   return groups;
 }
-export function chunkChangeModeEdits(
-  edits: ChangeModeEdit[],
-  maxCharsPerChunk: number = 20000
-): EditChunk[] {
+export function chunkChangeModeEdits(edits: ChangeModeEdit[], maxCharsPerChunk: number = 20000): EditChunk[] {
   if (edits.length === 0) {
     return [];
   }
-  
+
   const chunks: EditChunk[] = [];
   const fileGroups = groupEditsByFile(edits);
   let currentChunk: ChangeModeEdit[] = [];
   let currentSize = 0;
-  
-  for (const [filename, fileEdits] of fileGroups) {
+
+  for (const [_filename, fileEdits] of fileGroups) {
     const fileSize = fileEdits.reduce((sum, edit) => sum + estimateEditSize(edit), 0);
     if (fileSize > maxCharsPerChunk) {
       if (currentChunk.length > 0) {
@@ -45,13 +43,13 @@ export function chunkChangeModeEdits(
       }
       for (const edit of fileEdits) {
         const editSize = estimateEditSize(edit);
-        
+
         if (currentSize + editSize > maxCharsPerChunk && currentChunk.length > 0) {
           chunks.push(createChunk(currentChunk, chunks.length + 1, currentSize));
           currentChunk = [];
           currentSize = 0;
         }
-        
+
         currentChunk.push(edit);
         currentSize += editSize;
       }
@@ -65,29 +63,25 @@ export function chunkChangeModeEdits(
       currentSize += fileSize;
     }
   }
-  
+
   if (currentChunk.length > 0) {
     chunks.push(createChunk(currentChunk, chunks.length + 1, currentSize));
   }
-  
+
   const totalChunks = chunks.length;
   return chunks.map((chunk, index) => ({
     ...chunk,
     totalChunks,
-    hasMore: index < totalChunks - 1
+    hasMore: index < totalChunks - 1,
   }));
 }
 
-function createChunk(
-  edits: ChangeModeEdit[],
-  chunkIndex: number,
-  estimatedChars: number
-): EditChunk {
+function createChunk(edits: ChangeModeEdit[], chunkIndex: number, estimatedChars: number): EditChunk {
   return {
     edits,
     chunkIndex,
     totalChunks: 0,
     hasMore: false,
-    estimatedChars
+    estimatedChars,
   };
 }

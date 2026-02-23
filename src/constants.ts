@@ -1,5 +1,3 @@
-
-
 // Logging
 export const LOG_PREFIX = "[GMCPT]";
 
@@ -8,7 +6,8 @@ export const ERROR_MESSAGES = {
   QUOTA_EXCEEDED: "Quota exceeded for quota metric 'Gemini 2.5 Pro Requests'",
   QUOTA_EXCEEDED_SHORT: "⚠️ Gemini 2.5 Pro daily quota exceeded. Please retry with model: 'gemini-2.5-flash'",
   TOOL_NOT_FOUND: "not found in registry",
-  NO_PROMPT_PROVIDED: "Please provide a prompt for analysis. Use @ syntax to include files (e.g., '@largefile.js explain what this does') or ask general questions",
+  NO_PROMPT_PROVIDED:
+    "Please provide a prompt for analysis. Use @ syntax to include files (e.g., '@largefile.js explain what this does') or ask general questions",
 } as const;
 
 // Status messages
@@ -56,7 +55,6 @@ export const PROTOCOL = {
   KEEPALIVE_INTERVAL: 25000, // 25 seconds
 } as const;
 
-
 // CLI Constants
 export const CLI = {
   // Command names
@@ -77,7 +75,6 @@ export const CLI = {
     BOOLEAN_FALSE: "false",
   },
 } as const;
-
 
 // Execution limits
 export const EXECUTION = {

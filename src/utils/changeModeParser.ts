@@ -1,4 +1,4 @@
-import { Logger } from './logger.js';
+import { Logger } from "./logger.js";
 
 export interface ChangeModeEdit {
   filename: string;
@@ -13,16 +13,16 @@ export function parseChangeModeOutput(geminiResponse: string): ChangeModeEdit[] 
   const edits: ChangeModeEdit[] = [];
   const markdownPattern = /\*\*FILE:\s*(.+?):(\d+)\*\*\s*\n```\s*\nOLD:\s*\n([\s\S]*?)\nNEW:\s*\n([\s\S]*?)\n```/g;
 
-  let match;
-  while ((match = markdownPattern.exec(geminiResponse)) !== null) {
+  let match: RegExpExecArray | null = markdownPattern.exec(geminiResponse);
+  while (match !== null) {
     const [_fullMatch, filename, startLineStr, oldCodeRaw, newCodeRaw] = match;
 
     const oldCode = oldCodeRaw.trimEnd();
     const newCode = newCodeRaw.trimEnd();
     const startLine = parseInt(startLineStr, 10);
 
-    const oldLineCount = oldCode === '' ? 0 : oldCode.split('\n').length;
-    const newLineCount = newCode === '' ? 0 : newCode.split('\n').length;
+    const oldLineCount = oldCode === "" ? 0 : oldCode.split("\n").length;
+    const newLineCount = newCode === "" ? 0 : newCode.split("\n").length;
 
     const oldEndLine = startLine + (oldLineCount > 0 ? oldLineCount - 1 : 0);
 
@@ -38,12 +38,15 @@ export function parseChangeModeOutput(geminiResponse: string): ChangeModeEdit[] 
       newEndLine: newEndLine,
       newCode: newCode,
     });
+    match = markdownPattern.exec(geminiResponse);
   }
 
   if (edits.length === 0) {
-    const editPattern = /\/old\/ \* (.+?) 'start:' (\d+)\n([\s\S]*?)\n\/\/ 'end:' (\d+)\s*\n\s*\\new\\ \* (.+?) 'start:' (\d+)\n([\s\S]*?)\n\/\/ 'end:' (\d+)/g;
+    const editPattern =
+      /\/old\/ \* (.+?) 'start:' (\d+)\n([\s\S]*?)\n\/\/ 'end:' (\d+)\s*\n\s*\\new\\ \* (.+?) 'start:' (\d+)\n([\s\S]*?)\n\/\/ 'end:' (\d+)/g;
 
-    while ((match = editPattern.exec(geminiResponse)) !== null) {
+    match = editPattern.exec(geminiResponse);
+    while (match !== null) {
       const [
         _fullMatch,
         oldFilename,
@@ -70,6 +73,7 @@ export function parseChangeModeOutput(geminiResponse: string): ChangeModeEdit[] 
         newEndLine: parseInt(newEndLine, 10),
         newCode: newCode.trimEnd(),
       });
+      match = editPattern.exec(geminiResponse);
     }
   }
 
@@ -83,7 +87,7 @@ export function validateChangeModeEdits(edits: ChangeModeEdit[]): {
 
   for (const edit of edits) {
     if (!edit.filename) {
-      errors.push('Edit missing filename');
+      errors.push("Edit missing filename");
     }
 
     if (edit.oldStartLine > edit.oldEndLine) {

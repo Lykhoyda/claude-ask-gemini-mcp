@@ -1,6 +1,6 @@
-import type { ToolArguments } from "../constants.js";
-import { ZodError } from "zod";
 import type { ZodTypeAny } from "zod";
+import { ZodError } from "zod";
+import type { ToolArguments } from "../constants.js";
 
 export interface UnifiedTool {
   name: string;
@@ -17,20 +17,26 @@ export interface UnifiedTool {
   };
 
   execute: (args: ToolArguments, onProgress?: (newOutput: string) => void) => Promise<string>;
-  category?: 'simple' | 'gemini' | 'utility';
+  category?: "simple" | "gemini" | "utility";
 }
 
 export const toolRegistry: UnifiedTool[] = [];
 
-export async function executeTool(toolName: string, args: ToolArguments, onProgress?: (newOutput: string) => void): Promise<string> {
-  const tool = toolRegistry.find(t => t.name === toolName);
-  if (!tool) { throw new Error(`Unknown tool: ${toolName}`); }
+export async function executeTool(
+  toolName: string,
+  args: ToolArguments,
+  onProgress?: (newOutput: string) => void,
+): Promise<string> {
+  const tool = toolRegistry.find((t) => t.name === toolName);
+  if (!tool) {
+    throw new Error(`Unknown tool: ${toolName}`);
+  }
   try {
     const validatedArgs = tool.zodSchema.parse(args);
     return tool.execute(validatedArgs, onProgress);
   } catch (error) {
     if (error instanceof ZodError) {
-      const issues = error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ');
+      const issues = error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join(", ");
       throw new Error(`Invalid arguments for ${toolName}: ${issues}`);
     }
     throw error;
@@ -38,7 +44,7 @@ export async function executeTool(toolName: string, args: ToolArguments, onProgr
 }
 
 export function getPromptMessage(toolName: string, args: Record<string, string>): string {
-  const tool = toolRegistry.find(t => t.name === toolName);
+  const tool = toolRegistry.find((t) => t.name === toolName);
   if (!tool?.prompt) {
     throw new Error(`No prompt defined for tool: ${toolName}`);
   }
@@ -49,8 +55,8 @@ export function getPromptMessage(toolName: string, args: Record<string, string>)
   }
 
   Object.entries(args).forEach(([key, value]) => {
-    if (key !== 'prompt' && value !== undefined && value !== null && value !== 'false') {
-      if (value === 'true') {
+    if (key !== "prompt" && value !== undefined && value !== null && value !== "false") {
+      if (value === "true") {
         paramStrings.push(`[${key}]`);
       } else {
         paramStrings.push(`(${key}: ${value})`);
@@ -58,5 +64,5 @@ export function getPromptMessage(toolName: string, args: Record<string, string>)
     }
   });
 
-  return `Use the ${toolName} tool${paramStrings.length > 0 ? ': ' + paramStrings.join(' ') : ''}`;
+  return `Use the ${toolName} tool${paramStrings.length > 0 ? `: ${paramStrings.join(" ")}` : ""}`;
 }
