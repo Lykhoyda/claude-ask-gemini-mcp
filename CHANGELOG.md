@@ -32,6 +32,8 @@
 - Replaced `Logger._commandStartTimes` Map keyed by `Date.now()` with incrementing counter to avoid key collisions
 
 ### Added
+- Updated default models to `gemini-3.1-pro-preview` (Pro) and `gemini-3-flash-preview` (Flash)
+- Fixed quota fallback to match on `RESOURCE_EXHAUSTED` instead of model-specific string (works for any model generation)
 - Configured Biome v2.4.4 for linting and formatting (`biome.json`)
 - Added npm scripts: `format`, `format:check`, `check` (Biome) alongside existing `lint` (now Biome + tsc)
 - Enforced `useImportType` rule to ensure explicit type imports per project convention

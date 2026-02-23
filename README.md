@@ -10,7 +10,7 @@
 
 </div>
 
-An MCP server that bridges Claude with Google Gemini CLI for AI-to-AI collaboration. **Gemini reads, Claude edits** — leverage Gemini's massive token window (1M-2M tokens) for large file and codebase analysis while Claude handles interaction and code editing.
+An MCP server that bridges Claude with Google Gemini CLI for AI-to-AI collaboration. **Gemini reads, Claude edits** — leverage Gemini's massive token window (1M tokens) for large file and codebase analysis while Claude handles interaction and code editing.
 
 ## Why?
 

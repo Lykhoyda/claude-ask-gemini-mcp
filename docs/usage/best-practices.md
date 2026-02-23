@@ -50,9 +50,8 @@ Include configuration with implementation:
 ## Token Management
 
 ### Gemini Model Selection
-- **Quick tasks**: Use Flash (1M tokens)
-- **Full analysis**: Use Pro (2M tokens)
-- **Simple queries**: Use Flash-8B
+- **Quick tasks**: Use Flash — `gemini-3-flash-preview` (1M tokens)
+- **Full analysis**: Use Pro — `gemini-3.1-pro-preview` (1M tokens, default)
 
 ### Efficient File Inclusion
 ```bash
@@ -167,8 +166,8 @@ ask gemini to analyze @src/**/*.js @package.json @.env.example
 ✅ `@error.log @config.js "why doesn't database connection work?"`
 
 ### 3. Ignoring Model Limits
-❌ Trying to analyze 5M tokens with Flash model
-✅ Using Pro for large codebases, Flash for single files
+❌ Trying to analyze more than 1M tokens in a single request
+✅ Using Pro for large codebases, Flash for quick single-file tasks
 
 ### 4. Vague Success Criteria
 ❌ "make it better"

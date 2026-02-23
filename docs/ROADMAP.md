@@ -11,7 +11,7 @@
 - [ ] MCP tool annotations per spec (upstream PR #46)
 - [ ] LRU response caching with performance optimizations (upstream PR #44)
 - [ ] Gemini API compatibility mode (upstream PR #35)
-- [x] Update default model to `gemini-3-pro-preview` (upstream PR #54)
+- [x] Update default model to `gemini-3.1-pro-preview` (upstream PR #54)
 
 ## Priority 3: Open Issues
 - [ ] Allow model configuration via MCP JSON settings (upstream Issue #49)

@@ -47,9 +47,9 @@ It's how you reference files for analysis:
 Yes! Gemini's 1M token context allows analyzing entire codebases.
 
 ### Which model should I use?
-- **Daily work**: Gemini Pro
-- **Large analysis**: Gemini Pro
-- **Quick tasks**: Gemini Flash
+- **Daily work**: `gemini-3.1-pro-preview` (default)
+- **Large analysis**: `gemini-3.1-pro-preview`
+- **Quick tasks**: `gemini-3-flash-preview`
 
 ## Features
 
