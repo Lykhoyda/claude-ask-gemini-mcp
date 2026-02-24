@@ -25,11 +25,17 @@
   },
   "keywords": [
     "mcp",
+    "mcp-server",
     "modelcontextprotocol",
     "gemini",
-    "cli",
+    "gemini-cli",
+    "google-gemini",
+    "claude",
     "ai",
-    "llm"
+    "ai-collaboration",
+    "llm",
+    "code-review",
+    "second-opinion"
   ],
   "author": "Lykhoyda",
   "license": "MIT",

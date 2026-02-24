@@ -26,7 +26,11 @@ An [MCP](https://modelcontextprotocol.io/) server for AI-to-AI collaboration via
 ### Claude Code
 
 ```bash
+# Project scope (available in current project only)
 claude mcp add gemini-cli -- npx -y ask-gemini-mcp
+
+# User scope (available across all projects)
+claude mcp add --scope user gemini-cli -- npx -y ask-gemini-mcp
 ```
 
 ### Claude Desktop

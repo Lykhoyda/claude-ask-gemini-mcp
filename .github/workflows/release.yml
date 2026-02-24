@@ -6,7 +6,7 @@ on:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   publish:
@@ -42,3 +42,9 @@ jobs:
 
       - run: ./mcp-publisher login github-oidc
       - run: ./mcp-publisher publish
+
+      # GitHub Release with auto-generated changelog
+      - name: Create GitHub Release
+        run: gh release create "${{ github.ref_name }}" --generate-notes --title "${{ github.ref_name }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
