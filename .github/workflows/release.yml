@@ -24,10 +24,10 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      # npm Trusted Publisher — OIDC auth, no token needed
+      # npm — Trusted Publisher OIDC, no token needed
       - run: npm publish --access public
 
-      # MCP Registry — OIDC auth, no token needed
+      # Official MCP Registry — OIDC, no token needed
       - name: Install mcp-publisher
         run: |
           curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
@@ -39,3 +39,9 @@ jobs:
 
       - run: ./mcp-publisher login github-oidc
       - run: ./mcp-publisher publish
+
+      # Smithery — service token
+      - name: Publish to Smithery
+        run: npx -y @smithery/cli mcp publish --name Lykhoyda/ask-gemini-mcp
+        env:
+          SMITHERY_TOKEN: ${{ secrets.SMITHERY_TOKEN }}

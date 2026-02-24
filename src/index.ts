@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
@@ -10,12 +11,12 @@ import { PROTOCOL } from "./constants.js";
 import { executeTool, getPromptMessage, toolRegistry } from "./tools/index.js";
 import { Logger } from "./utils/logger.js";
 
+const require = createRequire(import.meta.url);
+const { name, version } = require("../package.json") as { name: string; version: string };
+
 type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
-const server = new McpServer({
-  name: "claude-ask-gemini",
-  version: "1.1.4",
-});
+const server = new McpServer({ name, version });
 
 let isProcessing = false;
 let currentOperationName = "";
@@ -146,10 +147,10 @@ for (const tool of toolRegistry) {
 }
 
 async function main() {
-  Logger.debug("init claude-ask-gemini");
+  Logger.debug("init ask-gemini-mcp");
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  Logger.debug("claude-ask-gemini listening on stdio");
+  Logger.debug("ask-gemini-mcp listening on stdio");
 }
 
 main().catch((error) => {
