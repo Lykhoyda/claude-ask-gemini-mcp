@@ -22,8 +22,8 @@
 
 ## Priority 4: Distribution
 - [x] Publish to official MCP Registry via `mcp-publisher` (ADR-016)
-- [x] Automated release workflow: `git tag v* && git push` → npm + MCP Registry + Smithery (ADR-016)
-- [x] Smithery integration in release workflow
+- [x] Automated release workflow: `git tag v* && git push` → npm + MCP Registry (ADR-016)
+- [ ] ~~Smithery~~ (requires paid plan for stdio servers — skipped)
 - [ ] Add GitHub Release with changelog (gh release create)
 - [ ] Submit to awesome-mcp-servers list
 - [ ] Submit to mcp.so and mcpservers.org directories
