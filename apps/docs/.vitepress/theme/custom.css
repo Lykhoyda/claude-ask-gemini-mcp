@@ -54,20 +54,6 @@ html.dark {
   backdrop-filter: none;
 }
 
-.VPNavBarTitle .logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  overflow: hidden;
-  transform: scale(1.3);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-html.dark .VPNavBarTitle .logo {
-  mix-blend-mode: screen;
-  filter: contrast(1.2) saturate(1.1);
-  box-shadow: 0 2px 12px rgba(255, 255, 255, 0.05);
-}
 
 /* ---- Sidebar ---- */
 .VPSidebar {

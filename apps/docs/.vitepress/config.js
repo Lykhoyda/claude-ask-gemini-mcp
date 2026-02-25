@@ -17,24 +17,6 @@ export default withMermaid(
     //appearance: 'dark',
 
     head: [
-      ["link", { rel: "icon", href: "/ask-gemini-mcp/favicon.ico" }],
-      [
-        "link",
-        {
-          rel: "icon",
-          type: "image/png",
-          sizes: "128x128",
-          href: "/ask-gemini-mcp/icon.png",
-        },
-      ],
-      [
-        "link",
-        {
-          rel: "apple-touch-icon",
-          sizes: "128x128",
-          href: "/ask-gemini-mcp/icon.png",
-        },
-      ],
       ["link", { rel: "preconnect", href: "https://fonts.googleapis.com" }],
       [
         "link",
@@ -54,7 +36,6 @@ export default withMermaid(
     ],
 
     themeConfig: {
-      logo: "/icon.png",
 
       nav: [
         { text: "Home", link: "/" },
