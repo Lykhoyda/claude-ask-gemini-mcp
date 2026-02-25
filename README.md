@@ -12,7 +12,7 @@
 
 </div>
 
-An [MCP](https://modelcontextprotocol.io/) server for AI-to-AI collaboration via the Gemini CLI. Works with Claude Code, Claude Desktop, Cursor, Warp, Copilot, and [40+ other MCP clients](https://modelcontextprotocol.io/clients). Leverage Gemini's massive 1M+ token context window for large file and codebase analysis while your primary AI handles interaction and code editing.
+An [MCP](https://modelcontextprotocol.io/) server for AI-to-AI collaboration via the Gemini CLI. Available on npm: [`ask-gemini-mcp`](https://www.npmjs.com/package/ask-gemini-mcp). Works with Claude Code, Claude Desktop, Cursor, Warp, Copilot, and [40+ other MCP clients](https://modelcontextprotocol.io/clients). Leverage Gemini's massive 1M+ token context window for large file and codebase analysis while your primary AI handles interaction and code editing.
 
 ## Why?
 

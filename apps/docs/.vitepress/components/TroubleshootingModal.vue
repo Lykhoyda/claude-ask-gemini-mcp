@@ -17,9 +17,11 @@
           <span class="problem-badge">Problem</span>
           <h2>{{ title }}</h2>
         </div>
-        <button @click="closeModal" class="close-btn" title="Close">&times;</button>
+        <button @click="closeModal" class="close-btn" title="Close">
+          &times;
+        </button>
       </div>
-      
+
       <div class="modal-body">
         <div class="solution-section">
           <h3 class="solution-title">
@@ -35,121 +37,124 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from "vue";
 
 const props = defineProps({
   title: {
     type: String,
-    required: true
+    required: true,
   },
   preview: {
     type: String,
-    required: true
-  }
-})
+    required: true,
+  },
+});
 
-const isOpen = ref(false)
+const isOpen = ref(false);
 
 const openModal = async () => {
-  isOpen.value = true
-  document.body.style.overflow = 'hidden'
-  
+  isOpen.value = true;
+  document.body.style.overflow = "hidden";
+
   // Wait for modal to render, then add copy buttons
-  await nextTick()
-  setTimeout(addCopyButtons, 100)
-}
+  await nextTick();
+  setTimeout(addCopyButtons, 100);
+};
 
 const closeModal = () => {
-  isOpen.value = false
-  document.body.style.overflow = ''
-}
+  isOpen.value = false;
+  document.body.style.overflow = "";
+};
 
 const addCopyButtons = () => {
-  const modal = document.querySelector('.issue-modal')
-  if (!modal) return
-  
+  const modal = document.querySelector(".issue-modal");
+  if (!modal) return;
+
   // Look for all code blocks (pre elements or code elements)
-  const codeBlocks = modal.querySelectorAll('pre, code')
-  
+  const codeBlocks = modal.querySelectorAll("pre, code");
+
   codeBlocks.forEach((block) => {
     // Skip inline code elements
-    if (block.tagName === 'CODE' && block.parentElement.tagName !== 'PRE') {
-      return
+    if (block.tagName === "CODE" && block.parentElement.tagName !== "PRE") {
+      return;
     }
-    
+
     // Skip if copy button already exists
-    if (block.querySelector('.copy-btn') || block.parentElement?.querySelector('.copy-btn')) return
-    
+    if (
+      block.querySelector(".copy-btn") ||
+      block.parentElement?.querySelector(".copy-btn")
+    )
+      return;
+
     // Use pre element for block code, code element for inline
-    const targetElement = block.tagName === 'PRE' ? block : block.parentElement
-    if (!targetElement) return
-    
-    const copyButton = document.createElement('button')
-    copyButton.className = 'copy-btn'
+    const targetElement = block.tagName === "PRE" ? block : block.parentElement;
+    if (!targetElement) return;
+
+    const copyButton = document.createElement("button");
+    copyButton.className = "copy-btn";
     copyButton.innerHTML = `
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
       </svg>
-    `
-    copyButton.title = 'Copy code'
-    copyButton.type = 'button'
-    
-    copyButton.addEventListener('click', async (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      
+    `;
+    copyButton.title = "Copy code";
+    copyButton.type = "button";
+
+    copyButton.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
       // Get the code content
-      const codeElement = targetElement.querySelector('code') || targetElement
-      if (!codeElement) return
-      
-      let textToCopy = codeElement.textContent || codeElement.innerText || ''
-      
+      const codeElement = targetElement.querySelector("code") || targetElement;
+      if (!codeElement) return;
+
+      let textToCopy = codeElement.textContent || codeElement.innerText || "";
+
       // Clean up the text (remove extra whitespace, etc.)
-      textToCopy = textToCopy.trim()
-      
-      console.log('Attempting to copy:', textToCopy) // Debug log
-      
+      textToCopy = textToCopy.trim();
+
+      console.log("Attempting to copy:", textToCopy); // Debug log
+
       try {
         // Try modern clipboard API first
         if (navigator.clipboard && navigator.clipboard.writeText) {
-          await navigator.clipboard.writeText(textToCopy)
+          await navigator.clipboard.writeText(textToCopy);
         } else {
           // Fallback for older browsers
-          const textArea = document.createElement('textarea')
-          textArea.value = textToCopy
-          textArea.style.position = 'fixed'
-          textArea.style.left = '-9999px'
-          document.body.appendChild(textArea)
-          textArea.select()
-          document.execCommand('copy')
-          document.body.removeChild(textArea)
+          const textArea = document.createElement("textarea");
+          textArea.value = textToCopy;
+          textArea.style.position = "fixed";
+          textArea.style.left = "-9999px";
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textArea);
         }
-        
+
         // Visual feedback
-        copyButton.classList.add('copied')
+        copyButton.classList.add("copied");
         copyButton.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <polyline points="20,6 9,17 4,12"></polyline>
           </svg>
-        `
-        
+        `;
+
         // Reset after 2 seconds
         setTimeout(() => {
-          copyButton.classList.remove('copied')
+          copyButton.classList.remove("copied");
           copyButton.innerHTML = `
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
-          `
-        }, 2000)
-        
-        console.log('Copy successful!') // Debug log
-        
+          `;
+        }, 2000);
+
+        console.log("Copy successful!"); // Debug log
       } catch (err) {
-        console.error('Failed to copy code:', err)
-        
+        console.error("Failed to copy code:", err);
+
         // Show error feedback
         copyButton.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -157,39 +162,39 @@ const addCopyButtons = () => {
             <line x1="15" y1="9" x2="9" y2="15"></line>
             <line x1="9" y1="9" x2="15" y2="15"></line>
           </svg>
-        `
-        
+        `;
+
         setTimeout(() => {
           copyButton.innerHTML = `
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
-          `
-        }, 2000)
+          `;
+        }, 2000);
       }
-    })
-    
+    });
+
     // Position the target element and add the button
-    targetElement.style.position = 'relative'
-    targetElement.appendChild(copyButton)
-  })
-}
+    targetElement.style.position = "relative";
+    targetElement.appendChild(copyButton);
+  });
+};
 
 const handleKeydown = (e) => {
-  if (e.key === 'Escape' && isOpen.value) {
-    closeModal()
+  if (e.key === "Escape" && isOpen.value) {
+    closeModal();
   }
-}
+};
 
 onMounted(() => {
-  document.addEventListener('keydown', handleKeydown)
-})
+  document.addEventListener("keydown", handleKeydown);
+});
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeydown)
-  document.body.style.overflow = ''
-})
+  document.removeEventListener("keydown", handleKeydown);
+  document.body.style.overflow = "";
+});
 </script>
 
 <style scoped>
@@ -416,7 +421,7 @@ onUnmounted(() => {
   transform: scale(0.95);
 }
 
-.solution-content :deep(ul), 
+.solution-content :deep(ul),
 .solution-content :deep(ol) {
   margin: 12px 0;
   padding-left: 20px;
@@ -441,29 +446,29 @@ onUnmounted(() => {
     width: 95vw;
     max-height: 90vh;
   }
-  
+
   .modal-header {
     padding: 16px 20px;
   }
-  
+
   .modal-title h2 {
     font-size: 18px;
   }
-  
+
   .modal-body {
     padding: 20px;
   }
-  
+
   .issue-card {
     padding: 14px;
   }
-  
+
   .issue-header {
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
   }
-  
+
   .expand-hint {
     opacity: 1;
     font-size: 11px;

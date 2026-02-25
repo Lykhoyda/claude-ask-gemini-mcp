@@ -265,7 +265,6 @@ echo $GOOGLE_GENERATIVE_AI_API_KEY
 - Consider breaking analysis into smaller chunks
 - Use more specific file patterns with `@` syntax
 - Switch to `gemini-3-flash-preview` for faster processing
-```
 
 ## Debug Mode
 

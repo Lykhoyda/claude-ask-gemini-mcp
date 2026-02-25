@@ -1,54 +1,78 @@
 <template>
   <div class="diagram-wrapper">
     <!-- Always visible diagram -->
-    <div 
-      class="diagram-container" 
-      @click="openModal"
-      :style="containerStyle"
-    >
+    <div class="diagram-container" @click="openModal" :style="containerStyle">
       <div class="diagram-preview">
         <slot />
       </div>
       <div class="zoom-hint">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/>
-          <path d="21 21l-4.35-4.35"/>
-          <path d="15 11h-8"/>
-          <path d="11 15v-8"/>
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+        >
+          <circle cx="11" cy="11" r="8" />
+          <path d="21 21l-4.35-4.35" />
+          <path d="15 11h-8" />
+          <path d="11 15v-8" />
         </svg>
         <span>Click to enlarge</span>
       </div>
     </div>
-    
+
     <!-- Modal overlay -->
-    <div 
-      v-if="isOpen" 
-      class="diagram-modal"
-      @click="closeModal"
-    >
+    <div v-if="isOpen" class="diagram-modal" @click="closeModal">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
           <div class="modal-controls">
             <div class="zoom-controls">
-              <button @click="zoomOut" class="control-btn" title="Zoom out" :disabled="scale <= 0.1">
+              <button
+                @click="zoomOut"
+                class="control-btn"
+                title="Zoom out"
+                :disabled="scale <= 0.1"
+              >
                 <span class="zoom-symbol">−</span>
               </button>
               <span class="zoom-info">{{ Math.round(scale * 100) }}%</span>
-              <button @click="zoomIn" class="control-btn" title="Zoom in" :disabled="scale >= maxZoom">
+              <button
+                @click="zoomIn"
+                class="control-btn"
+                title="Zoom in"
+                :disabled="scale >= maxZoom"
+              >
                 <span class="zoom-symbol">+</span>
               </button>
             </div>
             <div class="action-controls">
-              <button @click="fitToScreen" class="control-btn" title="Fit to screen">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+              <button
+                @click="fitToScreen"
+                class="control-btn"
+                title="Fit to screen"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"
+                  />
                 </svg>
               </button>
-              <button @click="closeModal" class="close-btn" title="Close">&times;</button>
+              <button @click="closeModal" class="close-btn" title="Close">
+                &times;
+              </button>
             </div>
           </div>
         </div>
-        <div 
+        <div
           class="diagram-zoom-container"
           ref="zoomContainer"
           @wheel="handleZoom"
@@ -60,7 +84,7 @@
           @touchend="endPan"
         >
           <div class="diagram-content">
-            <div 
+            <div
               class="diagram-transform-wrapper"
               :style="contentStyle"
               ref="modalContent"
@@ -75,189 +99,192 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from "vue";
 
-const isOpen = ref(false)
-const scale = ref(1)
-const translateX = ref(0)
-const translateY = ref(0)
-const fitScale = ref(1)
-const isPanning = ref(false)
-const startX = ref(0)
-const startY = ref(0)
-const zoomContainer = ref(null)
+const isOpen = ref(false);
+const scale = ref(1);
+const translateX = ref(0);
+const translateY = ref(0);
+const fitScale = ref(1);
+const isPanning = ref(false);
+const startX = ref(0);
+const startY = ref(0);
+const zoomContainer = ref(null);
 
 const maxZoom = computed(() => {
-  return Math.max(5, fitScale.value * 5) // At least 5x, or 5x the fit scale
-})
+  return Math.max(5, fitScale.value * 5); // At least 5x, or 5x the fit scale
+});
 
 const containerStyle = computed(() => ({
-  cursor: 'pointer',
-  border: '1px solid #ddd',
-  borderRadius: '8px',
-  padding: '10px',
-  margin: '10px 0',
-  transition: 'all 0.2s ease',
-  ':hover': {
-    borderColor: '#999'
-  }
-}))
+  cursor: "pointer",
+  border: "1px solid #ddd",
+  borderRadius: "8px",
+  padding: "10px",
+  margin: "10px 0",
+  transition: "all 0.2s ease",
+  ":hover": {
+    borderColor: "#999",
+  },
+}));
 
 const contentStyle = computed(() => ({
   transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value})`,
-  transformOrigin: 'center',
-  transition: isPanning.value ? 'none' : 'transform 0.2s ease'
-}))
+  transformOrigin: "center",
+  transition: isPanning.value ? "none" : "transform 0.2s ease",
+}));
 
 const openModal = () => {
-  isOpen.value = true
-  document.body.style.overflow = 'hidden'
+  isOpen.value = true;
+  document.body.style.overflow = "hidden";
   // Start by fitting to screen
   setTimeout(() => {
-    calculateFitScale()
-    fitToScreen()
-  }, 100)
-}
+    calculateFitScale();
+    fitToScreen();
+  }, 100);
+};
 
 const closeModal = () => {
-  isOpen.value = false
-  document.body.style.overflow = ''
+  isOpen.value = false;
+  document.body.style.overflow = "";
   // Reset zoom and pan for next time
-  scale.value = 1
-  translateX.value = 0
-  translateY.value = 0
-}
-
+  scale.value = 1;
+  translateX.value = 0;
+  translateY.value = 0;
+};
 
 const zoomIn = () => {
-  scale.value = Math.min(maxZoom.value, scale.value + 0.2)
-}
+  scale.value = Math.min(maxZoom.value, scale.value + 0.2);
+};
 
 const zoomOut = () => {
-  scale.value = Math.max(0.1, scale.value - 0.2)
-}
+  scale.value = Math.max(0.1, scale.value - 0.2);
+};
 
 const fitToScreen = () => {
-  const container = zoomContainer.value
-  if (!container) return
-  
+  const container = zoomContainer.value;
+  if (!container) return;
+
   // Only calculate fit scale once per modal session
   if (fitScale.value === 1) {
-    calculateFitScale()
+    calculateFitScale();
   }
-  
+
   // Always use the stored fit scale
-  scale.value = fitScale.value
-  translateX.value = 0
-  translateY.value = 0
-}
+  scale.value = fitScale.value;
+  translateX.value = 0;
+  translateY.value = 0;
+};
 
 const calculateFitScale = () => {
-  const container = zoomContainer.value
-  if (!container) return
-  
+  const container = zoomContainer.value;
+  if (!container) return;
+
   try {
-    const containerRect = container.getBoundingClientRect()
-    
+    const containerRect = container.getBoundingClientRect();
+
     // Try multiple selectors to find the diagram
     const selectors = [
-      'svg',
-      '.mermaid',
-      '.mermaid svg',
+      "svg",
+      ".mermaid",
+      ".mermaid svg",
       '[data-processed="true"]',
       'pre[class*="mermaid"]',
-      'div[class*="mermaid"]'
-    ]
-    
-    let diagramElement = null
-    let diagramRect = null
-    
+      'div[class*="mermaid"]',
+    ];
+
+    let diagramElement = null;
+    let diagramRect = null;
+
     for (const selector of selectors) {
-      diagramElement = container.querySelector(selector)
+      diagramElement = container.querySelector(selector);
       if (diagramElement) {
-        diagramRect = diagramElement.getBoundingClientRect()
+        diagramRect = diagramElement.getBoundingClientRect();
         // Make sure we found a valid element with dimensions
         if (diagramRect.width > 0 && diagramRect.height > 0) {
-          break
+          break;
         }
       }
     }
-    
-    if (!diagramElement || !diagramRect || diagramRect.width === 0 || diagramRect.height === 0) {
+
+    if (
+      !diagramElement ||
+      !diagramRect ||
+      diagramRect.width === 0 ||
+      diagramRect.height === 0
+    ) {
       // Final fallback: use the container content
-      const content = container.querySelector('.diagram-content')
+      const content = container.querySelector(".diagram-content");
       if (content) {
-        diagramRect = content.getBoundingClientRect()
+        diagramRect = content.getBoundingClientRect();
       }
     }
-    
+
     if (!diagramRect || diagramRect.width === 0 || diagramRect.height === 0) {
       // Ultimate fallback
-      fitScale.value = 1.2
-      return
+      fitScale.value = 1.2;
+      return;
     }
-    
+
     // Calculate scale to fit with padding
-    const padding = 40
-    const availableWidth = containerRect.width - padding
-    const availableHeight = containerRect.height - padding
-    
-    const scaleX = availableWidth / diagramRect.width
-    const scaleY = availableHeight / diagramRect.height
-    
+    const padding = 40;
+    const availableWidth = containerRect.width - padding;
+    const availableHeight = containerRect.height - padding;
+
+    const scaleX = availableWidth / diagramRect.width;
+    const scaleY = availableHeight / diagramRect.height;
+
     // Use the smaller scale to ensure it fits both dimensions
-    const optimalScale = Math.min(scaleX, scaleY)
-    
+    const optimalScale = Math.min(scaleX, scaleY);
+
     // Apply reasonable bounds
-    fitScale.value = Math.max(0.3, Math.min(optimalScale, 4))
-    
+    fitScale.value = Math.max(0.3, Math.min(optimalScale, 4));
   } catch (error) {
-    console.warn('Error calculating fit scale:', error)
-    fitScale.value = 1.2
+    console.warn("Error calculating fit scale:", error);
+    fitScale.value = 1.2;
   }
-}
+};
 
 const handleZoom = (e) => {
-  e.preventDefault()
-  const delta = e.deltaY > 0 ? -0.1 : 0.1
-  scale.value = Math.max(0.1, Math.min(maxZoom.value, scale.value + delta))
-}
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? -0.1 : 0.1;
+  scale.value = Math.max(0.1, Math.min(maxZoom.value, scale.value + delta));
+};
 
 const startPan = (e) => {
-  isPanning.value = true
-  const clientX = e.clientX || e.touches[0].clientX
-  const clientY = e.clientY || e.touches[0].clientY
-  startX.value = clientX - translateX.value
-  startY.value = clientY - translateY.value
-}
+  isPanning.value = true;
+  const clientX = e.clientX || e.touches[0].clientX;
+  const clientY = e.clientY || e.touches[0].clientY;
+  startX.value = clientX - translateX.value;
+  startY.value = clientY - translateY.value;
+};
 
 const handlePan = (e) => {
-  if (!isPanning.value) return
-  e.preventDefault()
-  const clientX = e.clientX || e.touches[0].clientX
-  const clientY = e.clientY || e.touches[0].clientY
-  translateX.value = clientX - startX.value
-  translateY.value = clientY - startY.value
-}
+  if (!isPanning.value) return;
+  e.preventDefault();
+  const clientX = e.clientX || e.touches[0].clientX;
+  const clientY = e.clientY || e.touches[0].clientY;
+  translateX.value = clientX - startX.value;
+  translateY.value = clientY - startY.value;
+};
 
 const endPan = () => {
-  isPanning.value = false
-}
+  isPanning.value = false;
+};
 
 const handleKeydown = (e) => {
-  if (e.key === 'Escape' && isOpen.value) {
-    closeModal()
+  if (e.key === "Escape" && isOpen.value) {
+    closeModal();
   }
-}
+};
 
 onMounted(() => {
-  document.addEventListener('keydown', handleKeydown)
-})
+  document.addEventListener("keydown", handleKeydown);
+});
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeydown)
-  document.body.style.overflow = ''
-})
+  document.removeEventListener("keydown", handleKeydown);
+  document.body.style.overflow = "";
+});
 </script>
 
 <style scoped>
@@ -447,7 +474,11 @@ onUnmounted(() => {
   cursor: grab;
   position: relative;
   background: var(--vp-c-bg);
-  background-image: radial-gradient(circle, var(--vp-c-border) 1px, transparent 1px);
+  background-image: radial-gradient(
+    circle,
+    var(--vp-c-border) 1px,
+    transparent 1px
+  );
   background-size: 20px 20px;
   background-position: 0 0;
 }
@@ -474,32 +505,32 @@ onUnmounted(() => {
     max-height: none;
     border-radius: 0;
   }
-  
+
   .modal-header {
     padding: 10px 15px;
   }
-  
+
   .modal-controls {
     justify-content: center;
     flex-wrap: wrap;
     gap: 10px;
   }
-  
+
   .zoom-controls {
     order: 1;
   }
-  
+
   .action-controls {
     order: 2;
   }
-  
+
   .zoom-hint {
     top: 5px;
     right: 5px;
     padding: 4px 8px;
     font-size: 11px;
   }
-  
+
   .zoom-hint span {
     display: none;
   }
@@ -509,17 +540,18 @@ onUnmounted(() => {
   .modal-controls {
     gap: 8px;
   }
-  
-  .zoom-controls, .action-controls {
+
+  .zoom-controls,
+  .action-controls {
     gap: 8px;
   }
-  
+
   .control-btn {
     padding: 10px;
     min-width: 44px;
     min-height: 44px;
   }
-  
+
   .close-btn {
     min-width: 44px;
     min-height: 44px;

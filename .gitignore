@@ -22,3 +22,8 @@ CLAUDE.md
 
 # MCP Registry tokens (created by mcp-publisher login)
 .mcpregistry_*
+
+.agents/
+.agent/
+skills-lock.json
+.playwright-mcp
