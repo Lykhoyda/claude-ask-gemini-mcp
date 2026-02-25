@@ -6,6 +6,49 @@ import { cacheChunks, getChunks } from "./chunkCache.js";
 import { executeCommand } from "./commandExecutor.js";
 import { Logger } from "./logger.js";
 
+interface GeminiJsonResponse {
+  response?: string;
+  stats?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    model?: string;
+  };
+  error?: {
+    message?: string;
+    code?: number;
+  };
+}
+
+function formatStats(stats: GeminiJsonResponse["stats"]): string {
+  if (!stats) return "";
+  const parts: string[] = [];
+  if (stats.inputTokens != null) parts.push(`${stats.inputTokens.toLocaleString()} input tokens`);
+  if (stats.outputTokens != null) parts.push(`${stats.outputTokens.toLocaleString()} output tokens`);
+  if (stats.model) parts.push(`model: ${stats.model}`);
+  return parts.length > 0 ? `\n\n[Gemini stats: ${parts.join(", ")}]` : "";
+}
+
+function parseGeminiJsonOutput(raw: string): string {
+  let parsed: GeminiJsonResponse;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    Logger.debug("Gemini output is not JSON, using raw text");
+    return raw;
+  }
+
+  if (parsed.error?.message) {
+    throw new Error(parsed.error.message);
+  }
+
+  if (typeof parsed.response !== "string") {
+    Logger.debug("Gemini JSON missing response field, using raw text");
+    return raw;
+  }
+
+  return parsed.response + formatStats(parsed.stats);
+}
+
 export async function executeGeminiCLI(
   prompt: string,
   model?: string,
@@ -88,10 +131,12 @@ ${prompt_processed}
   if (sandbox) {
     args.push(CLI.FLAGS.SANDBOX);
   }
+  args.push(CLI.FLAGS.OUTPUT_FORMAT, CLI.OUTPUT_FORMATS.JSON);
   args.push(CLI.FLAGS.PROMPT, prompt_processed);
 
   try {
-    return await executeCommand(CLI.COMMANDS.GEMINI, args, onProgress);
+    const raw = await executeCommand(CLI.COMMANDS.GEMINI, args, onProgress);
+    return parseGeminiJsonOutput(raw);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (errorMessage.includes(ERROR_MESSAGES.QUOTA_EXCEEDED) && model !== MODELS.FLASH) {
@@ -102,12 +147,13 @@ ${prompt_processed}
       if (sandbox) {
         fallbackArgs.push(CLI.FLAGS.SANDBOX);
       }
+      fallbackArgs.push(CLI.FLAGS.OUTPUT_FORMAT, CLI.OUTPUT_FORMATS.JSON);
       fallbackArgs.push(CLI.FLAGS.PROMPT, prompt_processed);
       try {
-        const result = await executeCommand(CLI.COMMANDS.GEMINI, fallbackArgs, onProgress);
+        const raw = await executeCommand(CLI.COMMANDS.GEMINI, fallbackArgs, onProgress);
         Logger.warn(`Successfully executed with ${MODELS.FLASH} fallback.`);
         Logger.debug(`Status: ${STATUS_MESSAGES.FLASH_SUCCESS}`);
-        return result;
+        return parseGeminiJsonOutput(raw);
       } catch (fallbackError) {
         const fallbackErrorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
         throw new Error(`${MODELS.PRO} quota exceeded, ${MODELS.FLASH} fallback also failed: ${fallbackErrorMessage}`);

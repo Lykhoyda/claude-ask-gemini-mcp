@@ -67,6 +67,11 @@ export const CLI = {
     MODEL: "-m",
     SANDBOX: "-s",
     PROMPT: "-p",
+    OUTPUT_FORMAT: "--output-format",
+  },
+  // Output format values
+  OUTPUT_FORMATS: {
+    JSON: "json",
   },
   // Default values
   DEFAULTS: {

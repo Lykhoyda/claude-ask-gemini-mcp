@@ -19,7 +19,7 @@
 ## Priority 3: Gemini CLI Parameter Expansion
 As a user, I want the MCP server to expose more Gemini CLI capabilities so I get richer responses, multi-turn conversations, and better workspace context.
 
-- [ ] **Structured JSON output** — pass `--output-format json` to get `{ response, stats, error }` back from Gemini instead of raw text. Gives token usage stats, structured errors, and cleaner response parsing
+- [x] **Structured JSON output** — pass `--output-format json` to get `{ response, stats, error }` back from Gemini instead of raw text. Gives token usage stats, structured errors, and cleaner response parsing (ADR-019)
 - [ ] **Multi-turn session support** — expose `--resume <sessionId>` via a new `sessionId` parameter. Return the session ID in responses so Claude can continue conversations with Gemini across multiple tool calls (upstream PR #50)
 - [ ] **Include additional directories** — expose `--include-directories <dirs>` via a new `includeDirs` string array parameter. Lets users point Gemini at code outside the CWD (monorepo support)
 - [ ] **Auto-approve tools in sandbox** — when `sandbox: true`, automatically pass `--approval-mode yolo` so Gemini can execute code without blocking on tool confirmations in the isolated environment

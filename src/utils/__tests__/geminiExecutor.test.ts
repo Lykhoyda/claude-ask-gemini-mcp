@@ -47,28 +47,49 @@ describe("executeGeminiCLI argument construction", () => {
 
     const [cmd, args] = mockExecuteCommand.mock.calls[0];
     expect(cmd).toBe(CLI.COMMANDS.GEMINI);
-    expect(args).toEqual([CLI.FLAGS.PROMPT, "hello"]);
+    expect(args).toEqual([CLI.FLAGS.OUTPUT_FORMAT, CLI.OUTPUT_FORMATS.JSON, CLI.FLAGS.PROMPT, "hello"]);
   });
 
   it("includes -m flag when model is specified", async () => {
     await executeGeminiCLI("hello", "gemini-3-flash-preview");
 
     const [, args] = mockExecuteCommand.mock.calls[0];
-    expect(args).toEqual([CLI.FLAGS.MODEL, "gemini-3-flash-preview", CLI.FLAGS.PROMPT, "hello"]);
+    expect(args).toEqual([
+      CLI.FLAGS.MODEL,
+      "gemini-3-flash-preview",
+      CLI.FLAGS.OUTPUT_FORMAT,
+      CLI.OUTPUT_FORMATS.JSON,
+      CLI.FLAGS.PROMPT,
+      "hello",
+    ]);
   });
 
   it("includes -s flag when sandbox is enabled", async () => {
     await executeGeminiCLI("hello", undefined, true);
 
     const [, args] = mockExecuteCommand.mock.calls[0];
-    expect(args).toEqual([CLI.FLAGS.SANDBOX, CLI.FLAGS.PROMPT, "hello"]);
+    expect(args).toEqual([
+      CLI.FLAGS.SANDBOX,
+      CLI.FLAGS.OUTPUT_FORMAT,
+      CLI.OUTPUT_FORMATS.JSON,
+      CLI.FLAGS.PROMPT,
+      "hello",
+    ]);
   });
 
   it("includes both model and sandbox flags", async () => {
     await executeGeminiCLI("hello", "gemini-3-flash-preview", true);
 
     const [, args] = mockExecuteCommand.mock.calls[0];
-    expect(args).toEqual([CLI.FLAGS.MODEL, "gemini-3-flash-preview", CLI.FLAGS.SANDBOX, CLI.FLAGS.PROMPT, "hello"]);
+    expect(args).toEqual([
+      CLI.FLAGS.MODEL,
+      "gemini-3-flash-preview",
+      CLI.FLAGS.SANDBOX,
+      CLI.FLAGS.OUTPUT_FORMAT,
+      CLI.OUTPUT_FORMATS.JSON,
+      CLI.FLAGS.PROMPT,
+      "hello",
+    ]);
   });
 
   it("prompt flag value is CLI.FLAGS.PROMPT constant", () => {
@@ -78,32 +99,53 @@ describe("executeGeminiCLI argument construction", () => {
 
 describe("executeGeminiCLI quota fallback", () => {
   it("retries with Flash model on RESOURCE_EXHAUSTED error", async () => {
-    mockExecuteCommand.mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED")).mockResolvedValueOnce("Flash response");
+    mockExecuteCommand
+      .mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED"))
+      .mockResolvedValueOnce(JSON.stringify({ response: "Flash response" }));
 
     const result = await executeGeminiCLI("hello");
 
-    expect(result).toBe("Flash response");
+    expect(result).toContain("Flash response");
     expect(mockExecuteCommand).toHaveBeenCalledTimes(2);
   });
 
   it("uses -p flag in fallback args too", async () => {
-    mockExecuteCommand.mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED")).mockResolvedValueOnce("Flash response");
+    mockExecuteCommand
+      .mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED"))
+      .mockResolvedValueOnce(JSON.stringify({ response: "Flash response" }));
 
     await executeGeminiCLI("hello");
 
     const [, fallbackArgs] = mockExecuteCommand.mock.calls[1];
     expect(fallbackArgs).toContain("-p");
     expect(fallbackArgs).not.toContain("--");
-    expect(fallbackArgs).toEqual([CLI.FLAGS.MODEL, MODELS.FLASH, CLI.FLAGS.PROMPT, "hello"]);
+    expect(fallbackArgs).toEqual([
+      CLI.FLAGS.MODEL,
+      MODELS.FLASH,
+      CLI.FLAGS.OUTPUT_FORMAT,
+      CLI.OUTPUT_FORMATS.JSON,
+      CLI.FLAGS.PROMPT,
+      "hello",
+    ]);
   });
 
   it("preserves sandbox flag in fallback args", async () => {
-    mockExecuteCommand.mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED")).mockResolvedValueOnce("Flash response");
+    mockExecuteCommand
+      .mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED"))
+      .mockResolvedValueOnce(JSON.stringify({ response: "Flash response" }));
 
     await executeGeminiCLI("hello", undefined, true);
 
     const [, fallbackArgs] = mockExecuteCommand.mock.calls[1];
-    expect(fallbackArgs).toEqual([CLI.FLAGS.MODEL, MODELS.FLASH, CLI.FLAGS.SANDBOX, CLI.FLAGS.PROMPT, "hello"]);
+    expect(fallbackArgs).toEqual([
+      CLI.FLAGS.MODEL,
+      MODELS.FLASH,
+      CLI.FLAGS.SANDBOX,
+      CLI.FLAGS.OUTPUT_FORMAT,
+      CLI.OUTPUT_FORMATS.JSON,
+      CLI.FLAGS.PROMPT,
+      "hello",
+    ]);
   });
 
   it("does not retry if already using Flash model", async () => {
@@ -159,5 +201,82 @@ describe("executeGeminiCLI changeMode", () => {
     const [, args] = mockExecuteCommand.mock.calls[0];
     expect(args).toContain("-p");
     expect(args).not.toContain("--");
+  });
+});
+
+describe("executeGeminiCLI JSON output format", () => {
+  it("always passes --output-format json flag", async () => {
+    await executeGeminiCLI("hello");
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    expect(args).toContain("--output-format");
+    expect(args).toContain("json");
+  });
+
+  it("passes --output-format json before -p flag", async () => {
+    await executeGeminiCLI("hello");
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    const formatIndex = args.indexOf("--output-format");
+    const promptIndex = args.indexOf("-p");
+    expect(formatIndex).toBeLessThan(promptIndex);
+  });
+
+  it("includes --output-format json in fallback args", async () => {
+    mockExecuteCommand
+      .mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED"))
+      .mockResolvedValueOnce(JSON.stringify({ response: "Flash response" }));
+
+    await executeGeminiCLI("hello");
+
+    const [, fallbackArgs] = mockExecuteCommand.mock.calls[1];
+    expect(fallbackArgs).toContain("--output-format");
+    expect(fallbackArgs).toContain("json");
+  });
+
+  it("parses JSON response and extracts response text", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ response: "parsed text", stats: {} }));
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toContain("parsed text");
+  });
+
+  it("appends stats summary when stats are present", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(
+      JSON.stringify({
+        response: "some response",
+        stats: { inputTokens: 1234, outputTokens: 567, model: "gemini-3.1-pro-preview" },
+      }),
+    );
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toContain("[Gemini stats:");
+    expect(result).toContain("1,234 input tokens");
+    expect(result).toContain("567 output tokens");
+    expect(result).toContain("gemini-3.1-pro-preview");
+  });
+
+  it("falls back to raw text when output is not valid JSON", async () => {
+    mockExecuteCommand.mockResolvedValueOnce("plain text response");
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toBe("plain text response");
+  });
+
+  it("falls back to raw text when JSON has no response field", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ stats: {} }));
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toBe(JSON.stringify({ stats: {} }));
+  });
+
+  it("throws when JSON contains an error field", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ error: { message: "Rate limit exceeded", code: 429 } }));
+
+    await expect(executeGeminiCLI("hello")).rejects.toThrow("Rate limit exceeded");
   });
 });
