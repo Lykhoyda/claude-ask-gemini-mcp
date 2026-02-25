@@ -119,6 +119,14 @@
 - **Consequences:** Zero logic duplication. Hooks get the same model fallback, quota handling, and chunking as the MCP server. Plugin is mostly markdown/config (~3 files). The `ask-gemini-run` binary also serves as a standalone CLI for users who want Gemini access without MCP.
 - **Design doc:** [docs/plans/2026-02-25-claude-code-plugin-design.md](plans/2026-02-25-claude-code-plugin-design.md)
 
+## ADR-019: Structured JSON Output via --output-format json
+- **Date:** 2026-02-25
+- **Status:** Accepted
+- **Context:** The Gemini CLI supports `--output-format json` which returns `{ response, stats, error }` instead of raw text. Our MCP server was parsing raw text output, losing token usage stats and getting unstructured error messages. Since we always invoke the CLI programmatically, structured JSON is strictly better.
+- **Decision:** Always pass `--output-format json` to the Gemini CLI. Parse JSON in `geminiExecutor.ts`, extract the `response` text, and append a one-line stats summary (input/output tokens, model). Fall back to raw text if JSON parsing fails (backward compat with older CLI versions). No schema changes — the improvement is transparent to MCP clients.
+- **Consequences:** Users get token usage visibility. Errors are structured and more informative. Older Gemini CLI versions that don't support `--output-format` degrade gracefully to the current behavior.
+- **Design doc:** [docs/plans/2026-02-25-structured-json-output-design.md](plans/2026-02-25-structured-json-output-design.md)
+
 ## ADR-017: Smithery CJS Compatibility — createSandboxServer Export
 - **Date:** 2026-02-24
 - **Status:** Accepted

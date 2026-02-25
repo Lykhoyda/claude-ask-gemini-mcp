@@ -16,26 +16,39 @@
 - [ ] Bundle as Claude Code plugin (`plugin.json`)
 - See [design doc](plans/2026-02-25-claude-code-plugin-design.md)
 
-## Priority 3: Features from Community PRs
-- [ ] Multi-turn session support via session IDs (upstream PR #50)
+## Priority 3: Gemini CLI Parameter Expansion
+As a user, I want the MCP server to expose more Gemini CLI capabilities so I get richer responses, multi-turn conversations, and better workspace context.
+
+- [ ] **Structured JSON output** — pass `--output-format json` to get `{ response, stats, error }` back from Gemini instead of raw text. Gives token usage stats, structured errors, and cleaner response parsing
+- [ ] **Multi-turn session support** — expose `--resume <sessionId>` via a new `sessionId` parameter. Return the session ID in responses so Claude can continue conversations with Gemini across multiple tool calls (upstream PR #50)
+- [ ] **Include additional directories** — expose `--include-directories <dirs>` via a new `includeDirs` string array parameter. Lets users point Gemini at code outside the CWD (monorepo support)
+- [ ] **Auto-approve tools in sandbox** — when `sandbox: true`, automatically pass `--approval-mode yolo` so Gemini can execute code without blocking on tool confirmations in the isolated environment
+- [ ] **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Enables live content streaming instead of "still working..." keepalive messages
+
+## Priority 4: Features from Community PRs
 - [ ] MCP tool annotations per spec (upstream PR #46)
 - [ ] LRU response caching with performance optimizations (upstream PR #44)
 - [ ] Gemini API compatibility mode (upstream PR #35)
 - [x] Update default model to `gemini-3.1-pro-preview` (upstream PR #54)
 
-## Priority 4: Open Issues
+## Priority 5: Open Issues
 - [ ] Allow model configuration via MCP JSON settings (upstream Issue #49)
 - [ ] Fix excessive token responses for small prompts (upstream Issues #6, #26)
 - [x] Add automated test suite (Vitest, 58 tests across 6 files, ADR-014)
 - [x] Set up linter and formatter (Biome v2.4.4)
 
-## Priority 5: Project Structure
+## Priority 6: Project Structure & Docs
 - [x] Move deployable VitePress docs to `apps/docs/` (index.md, getting-started.md, concepts/, usage/, .vitepress/, public/)
 - [x] Keep `docs/` for internal project docs only (ROADMAP, DECISIONS, BUGS, plans/)
 - [x] Update VitePress config, build scripts, and deploy workflow for new path
 - [x] Remove public roadmap page from VitePress site (unnecessary duplication of internal roadmap)
+- [x] Redesign homepage: replace feature grid with tabbed SetupTabs installation component
+- [x] Fix light theme readability: use `html:not(.dark)` selectors (VitePress has no `html.light` class)
+- [x] Add orange syntax highlighting for JSON strings in light mode code blocks
+- [x] Remove unused components (ClientGrid, CodeBlock, ConfigModal, ad/funding components)
+- [x] Apply Prettier formatting to all docs Vue/CSS/JS files
 
-## Priority 6: Distribution & Discovery
+## Priority 7: Distribution & Discovery
 - [x] Publish to official MCP Registry via `mcp-publisher` (ADR-016)
 - [x] Automated release workflow: `git tag v* && git push` → npm + MCP Registry (ADR-016)
 - [ ] ~~Smithery~~ (requires paid plan for stdio servers — skipped)
