@@ -13,10 +13,13 @@ interface GeminiJsonResponse {
     outputTokens?: number;
     model?: string;
   };
-  error?: {
-    message?: string;
-    code?: number;
-  };
+  error?:
+    | {
+        message?: string;
+        code?: number;
+      }
+    | string
+    | unknown[];
 }
 
 function formatStats(stats: GeminiJsonResponse["stats"]): string {
@@ -29,13 +32,48 @@ function formatStats(stats: GeminiJsonResponse["stats"]): string {
 }
 
 function extractJson(raw: string): string | null {
-  const trimmed = raw.trim();
-  const start = trimmed.indexOf("{");
-  if (start === -1) return null;
-  if (start > 0) {
-    Logger.debug(`Skipping ${start} chars of non-JSON prefix in Gemini output`);
+  let startIndex = raw.indexOf("{");
+
+  while (startIndex !== -1) {
+    let braceCount = 0;
+    let inString = false;
+    let escapeNext = false;
+
+    for (let i = startIndex; i < raw.length; i++) {
+      const char = raw[i];
+      if (escapeNext) {
+        escapeNext = false;
+        continue;
+      }
+      if (char === "\\") {
+        escapeNext = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (!inString) {
+        if (char === "{") braceCount++;
+        else if (char === "}") braceCount--;
+
+        if (braceCount === 0) {
+          const candidate = raw.slice(startIndex, i + 1);
+          try {
+            JSON.parse(candidate);
+            if (startIndex > 0) {
+              Logger.debug("Skipping non-JSON prefix in Gemini output");
+            }
+            return candidate;
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+    startIndex = raw.indexOf("{", startIndex + 1);
   }
-  return trimmed.slice(start);
+  return null;
 }
 
 function parseGeminiJsonOutput(raw: string): string {
@@ -45,7 +83,7 @@ function parseGeminiJsonOutput(raw: string): string {
     return raw;
   }
 
-  let parsed: GeminiJsonResponse;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
@@ -53,17 +91,30 @@ function parseGeminiJsonOutput(raw: string): string {
     return raw;
   }
 
-  if (parsed.error) {
-    const msg = parsed.error.message ?? `Gemini error code ${parsed.error.code ?? "unknown"}`;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    Logger.debug("Gemini output is not a JSON object, using raw text");
+    return raw;
+  }
+
+  const json = parsed as GeminiJsonResponse;
+
+  if (json.error) {
+    if (typeof json.error === "string") {
+      throw new Error(json.error);
+    }
+    if (Array.isArray(json.error)) {
+      throw new Error(`Gemini error: ${JSON.stringify(json.error)}`);
+    }
+    const msg = json.error.message ?? `Gemini error code ${json.error.code ?? "unknown"}`;
     throw new Error(msg);
   }
 
-  if (typeof parsed.response !== "string") {
+  if (typeof json.response !== "string") {
     Logger.debug("Gemini JSON missing response field, using raw text");
     return raw;
   }
 
-  return parsed.response + formatStats(parsed.stats);
+  return json.response + formatStats(json.stats);
 }
 
 export async function executeGeminiCLI(

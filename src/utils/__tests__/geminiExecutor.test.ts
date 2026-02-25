@@ -302,4 +302,53 @@ describe("executeGeminiCLI JSON output format", () => {
 
     expect(result).toBe("no json here at all");
   });
+
+  it("extracts JSON when CLI prints trailing text after JSON object", async () => {
+    const json = JSON.stringify({ response: "good response", stats: {} });
+    mockExecuteCommand.mockResolvedValueOnce(`${json}\nDone in 3.2s`);
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toContain("good response");
+  });
+
+  it("throws string error when error field is a string", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ error: "Rate limit exceeded" }));
+
+    await expect(executeGeminiCLI("hello")).rejects.toThrow("Rate limit exceeded");
+  });
+
+  it("falls back to raw text when JSON.parse returns null", async () => {
+    mockExecuteCommand.mockResolvedValueOnce("null");
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toBe("null");
+  });
+
+  it("falls back to raw text when parsed JSON is not an object", async () => {
+    mockExecuteCommand.mockResolvedValueOnce("42");
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toBe("42");
+  });
+
+  it("extracts JSON when warning prefix contains braces", async () => {
+    const json = JSON.stringify({ response: "real response", stats: {} });
+    mockExecuteCommand.mockResolvedValueOnce(`[Debug] config: { "retry": true }\n${json}`);
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toContain("real response");
+  });
+
+  it("throws array error with stringified details", async () => {
+    const errors = [{ message: "Rate limited" }, { message: "Quota exceeded" }];
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ error: errors }));
+
+    await expect(executeGeminiCLI("hello")).rejects.toThrow(
+      'Gemini error: [{"message":"Rate limited"},{"message":"Quota exceeded"}]',
+    );
+  });
 });
