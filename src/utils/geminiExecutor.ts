@@ -28,17 +28,34 @@ function formatStats(stats: GeminiJsonResponse["stats"]): string {
   return parts.length > 0 ? `\n\n[Gemini stats: ${parts.join(", ")}]` : "";
 }
 
+function extractJson(raw: string): string | null {
+  const trimmed = raw.trim();
+  const start = trimmed.indexOf("{");
+  if (start === -1) return null;
+  if (start > 0) {
+    Logger.debug(`Skipping ${start} chars of non-JSON prefix in Gemini output`);
+  }
+  return trimmed.slice(start);
+}
+
 function parseGeminiJsonOutput(raw: string): string {
-  let parsed: GeminiJsonResponse;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    Logger.debug("Gemini output is not JSON, using raw text");
+  const jsonStr = extractJson(raw);
+  if (!jsonStr) {
+    Logger.debug("Gemini output has no JSON object, using raw text");
     return raw;
   }
 
-  if (parsed.error?.message) {
-    throw new Error(parsed.error.message);
+  let parsed: GeminiJsonResponse;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    Logger.debug("Gemini output is not valid JSON, using raw text");
+    return raw;
+  }
+
+  if (parsed.error) {
+    const msg = parsed.error.message ?? `Gemini error code ${parsed.error.code ?? "unknown"}`;
+    throw new Error(msg);
   }
 
   if (typeof parsed.response !== "string") {

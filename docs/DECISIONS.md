@@ -125,6 +125,7 @@
 - **Context:** The Gemini CLI supports `--output-format json` which returns `{ response, stats, error }` instead of raw text. Our MCP server was parsing raw text output, losing token usage stats and getting unstructured error messages. Since we always invoke the CLI programmatically, structured JSON is strictly better.
 - **Decision:** Always pass `--output-format json` to the Gemini CLI. Parse JSON in `geminiExecutor.ts`, extract the `response` text, and append a one-line stats summary (input/output tokens, model). Fall back to raw text if JSON parsing fails (backward compat with older CLI versions). No schema changes — the improvement is transparent to MCP clients.
 - **Consequences:** Users get token usage visibility. Errors are structured and more informative. Older Gemini CLI versions that don't support `--output-format` degrade gracefully to the current behavior.
+- **Follow-up (2026-02-25):** Added `extractJson()` to handle CLI warning/debug lines before JSON object, and improved error handling for error responses that have only a code (no message).
 - **Design doc:** [docs/plans/2026-02-25-structured-json-output-design.md](plans/2026-02-25-structured-json-output-design.md)
 
 ## ADR-017: Smithery CJS Compatibility — createSandboxServer Export

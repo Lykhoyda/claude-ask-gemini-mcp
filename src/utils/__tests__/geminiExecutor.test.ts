@@ -279,4 +279,27 @@ describe("executeGeminiCLI JSON output format", () => {
 
     await expect(executeGeminiCLI("hello")).rejects.toThrow("Rate limit exceeded");
   });
+
+  it("throws with code when error has no message", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ error: { code: 503 } }));
+
+    await expect(executeGeminiCLI("hello")).rejects.toThrow("Gemini error code 503");
+  });
+
+  it("extracts JSON when CLI prints warnings before JSON object", async () => {
+    const json = JSON.stringify({ response: "actual response", stats: {} });
+    mockExecuteCommand.mockResolvedValueOnce(`WARNING: something\n${json}`);
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toContain("actual response");
+  });
+
+  it("falls back to raw text when output has no JSON object at all", async () => {
+    mockExecuteCommand.mockResolvedValueOnce("no json here at all");
+
+    const result = await executeGeminiCLI("hello");
+
+    expect(result).toBe("no json here at all");
+  });
 });
