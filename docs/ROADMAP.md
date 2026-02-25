@@ -30,9 +30,10 @@
 - [x] Set up linter and formatter (Biome v2.4.4)
 
 ## Priority 5: Project Structure
-- [ ] Move deployable VitePress docs to `apps/docs/` (index.md, getting-started.md, concepts/, usage/, .vitepress/, public/)
-- [ ] Keep `docs/` for internal project docs only (ROADMAP, DECISIONS, BUGS, plans/)
-- [ ] Update VitePress config, build scripts, and deploy workflow for new path
+- [x] Move deployable VitePress docs to `apps/docs/` (index.md, getting-started.md, concepts/, usage/, .vitepress/, public/)
+- [x] Keep `docs/` for internal project docs only (ROADMAP, DECISIONS, BUGS, plans/)
+- [x] Update VitePress config, build scripts, and deploy workflow for new path
+- [x] Remove public roadmap page from VitePress site (unnecessary duplication of internal roadmap)
 
 ## Priority 6: Distribution & Discovery
 - [x] Publish to official MCP Registry via `mcp-publisher` (ADR-016)

@@ -11,8 +11,8 @@ dist/
 
 
 # Docs Site
-docs/.vitepress/cache/
-docs/.vitepress/dist/
+apps/docs/.vitepress/cache/
+apps/docs/.vitepress/dist/
 
 # Desktop Extension build artifacts
 *.dxt

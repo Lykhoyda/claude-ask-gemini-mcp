@@ -55,7 +55,6 @@ export default withMermaid(
           text: 'Resources',
           collapsed: true,
           items: [
-            { text: 'Roadmap', link: '/resources/roadmap' },
             { text: 'Troubleshooting', link: '/resources/troubleshooting' },
             { text: 'FAQ', link: '/resources/faq' },
           ]
