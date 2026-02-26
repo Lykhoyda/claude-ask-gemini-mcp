@@ -26,7 +26,7 @@ No installation needed - runs directly:
 ## Method 2: Global Installation
 
 ```bash
-claude mcp add gemini-cli -- npx -y ask-gemini-mcp
+claude mcp add --scope user gemini-cli -- npx -y ask-gemini-mcp
 ```
 
 Then configure:

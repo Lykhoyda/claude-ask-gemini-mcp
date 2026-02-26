@@ -39,13 +39,13 @@ If you still get "command not found", restart your terminal or add npm global bi
 ```bash
 # Method 1: Install globally first
 npm install -g ask-gemini-mcp
-claude mcp add gemini-cli -- ask-gemini-mcp
+claude mcp add --scope user gemini-cli -- ask-gemini-mcp
 
 # Method 2: Use --yes instead of -y
-claude mcp add gemini-cli -- npx --yes ask-gemini-mcp
+claude mcp add --scope user gemini-cli -- npx --yes ask-gemini-mcp
 
 # Method 3: Remove the -y flag entirely
-claude mcp add gemini-cli -- npx ask-gemini-mcp
+claude mcp add --scope user gemini-cli -- npx ask-gemini-mcp
 ```
 
 </TroubleshootingModal>

@@ -32,7 +32,7 @@ Now you need to tell your primary AI assistant (like Claude) where the MCP serve
 Claude Code is Anthropic's terminal-native tool. It offers the fastest, most cohesive experience simply by running a single command:
 
 ```bash
-claude mcp add gemini-cli -- npx -y ask-gemini-mcp
+claude mcp add --scope user gemini-cli -- npx -y ask-gemini-mcp
 ```
 
 ### Option B: Claude Desktop 🖥️
