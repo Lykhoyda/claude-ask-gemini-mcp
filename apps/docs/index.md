@@ -45,6 +45,13 @@ hero:
       <h3>Seamless Integration</h3>
       <p>Works as a standard MCP tool, meaning no strange prompt hacks. Your primary LLM transparently delegates secondary research, code reviews, or brainstorming tasks to Gemini APIs.</p>
     </div>
+    <div class="feature-card">
+      <div class="icon-wrapper">
+        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feature-icon"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </div>
+      <h3>Multi-Turn Sessions</h3>
+      <p>Continue conversations with Gemini across multiple calls. Review code, then follow up for fixes — Gemini remembers the full context. See <a href="/ask-gemini-mcp/usage/multi-turn-sessions">Multi-Turn Sessions</a> for details.</p>
+    </div>
   </div>
 
 <h2 class="section-title">Explore the Docs</h2>
