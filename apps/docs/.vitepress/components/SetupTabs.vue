@@ -93,6 +93,27 @@
             </div>
           </div>
           <div
+            v-else-if="activeTab === 'antigravity'"
+            class="tab-panel"
+            key="antigravity"
+          >
+            <div class="panel-inner">
+              <p class="config-hint">Add to <code>~/.gemini/mcp.json</code>:</p>
+              <div class="language-json vp-adaptive-theme">
+                <button title="Copy Code" class="copy"></button>
+                <span class="lang">json</span>
+                <pre class="shiki"><code><span class="line">{</span>
+<span class="line">  <span class="string">"mcpServers"</span>: {</span>
+<span class="line">    <span class="string">"gemini-cli"</span>: {</span>
+<span class="line">      <span class="string">"command"</span>: <span class="string">"npx"</span>,</span>
+<span class="line">      <span class="string">"args"</span>: [<span class="string">"-y"</span>, <span class="string">"ask-gemini-mcp"</span>]</span>
+<span class="line">    }</span>
+<span class="line">  }</span>
+<span class="line">}</span></code></pre>
+              </div>
+            </div>
+          </div>
+          <div
             v-else-if="activeTab === 'opencode'"
             class="tab-panel"
             key="opencode"
@@ -142,6 +163,7 @@ const tabs = [
   { id: "claude-desktop", label: "Claude Desktop" },
   { id: "cursor", label: "Cursor" },
   { id: "codex", label: "Codex CLI" },
+  { id: "antigravity", label: "Antigravity" },
   { id: "opencode", label: "OpenCode" },
   { id: "other", label: "Other" },
 ];
@@ -238,10 +260,12 @@ html.dark .mac-dots span {
   background-color: #ff5f56;
   border: 1px solid #e0443e;
 }
+
 .mac-dots span:nth-child(2) {
   background-color: #ffbd2e;
   border: 1px solid #dea123;
 }
+
 .mac-dots span:nth-child(3) {
   background-color: #27c93f;
   border: 1px solid #1aab29;
@@ -362,6 +386,7 @@ html.dark .tab-panel :deep(div[class*="language-"]) {
   color: #8b949e;
   font-style: italic;
 }
+
 .string {
   color: #a5d6ff;
 }
@@ -375,27 +400,33 @@ html.dark .tab-panel :deep(div[class*="language-"]) {
 html:not(.dark) .tab-panel :deep(pre.shiki) {
   color: #1e2028;
 }
+
 html:not(.dark) .tab-panel :deep(pre.shiki code) {
   color: #1e2028;
 }
+
 /* Only override bare spans (no class), preserve .string and .comment colors */
 html:not(.dark) .tab-panel :deep(pre.shiki .line > span:not([class])) {
   color: #1e2028;
 }
+
 /* Force syntax colors in light mode — must come after base color rules */
 html:not(.dark) .tab-panel .string,
 html:not(.dark) .string {
   color: #c45100 !important;
 }
+
 html:not(.dark) .tab-panel .comment,
 html:not(.dark) .comment {
   color: #4b5563 !important;
   font-style: italic;
 }
+
 html:not(.dark) .tab-panel :deep(div[class*="language-"]) {
   background: #eceef2;
   border-color: rgba(0, 0, 0, 0.12);
 }
+
 html:not(.dark) .tab-panel :deep(.lang) {
   color: #6b7080;
 }
