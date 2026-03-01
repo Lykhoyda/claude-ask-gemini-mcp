@@ -69,6 +69,7 @@ export const CLI = {
     PROMPT: "-p",
     OUTPUT_FORMAT: "--output-format",
     RESUME: "--resume",
+    INCLUDE_DIRECTORIES: "--include-directories",
   },
   // Output format values
   OUTPUT_FORMATS: {
@@ -99,9 +100,10 @@ export interface ToolArguments {
   sandbox?: boolean | string;
   changeMode?: boolean | string;
   sessionId?: string;
+  includeDirs?: string[];
   chunkIndex?: number | string; // Which chunk to return (1-based)
   chunkCacheKey?: string; // Optional cache key for continuation
   message?: string;
 
-  [key: string]: string | boolean | number | undefined;
+  [key: string]: string | boolean | number | string[] | undefined;
 }

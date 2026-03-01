@@ -21,8 +21,7 @@ As a user, I want the MCP server to expose more Gemini CLI capabilities so I get
 
 - [x] **Structured JSON output** — pass `--output-format json` to get `{ response, stats, error }` back from Gemini instead of raw text. Gives token usage stats, structured errors, and cleaner response parsing (ADR-019)
 - [x] **Multi-turn session support** — expose `--resume <sessionId>` via a new `sessionId` parameter. Return the session ID in responses so Claude can continue conversations with Gemini across multiple tool calls (ADR-021)
-- [ ] **Include additional directories** — expose `--include-directories <dirs>` via a new `includeDirs` string array parameter. Lets users point Gemini at code outside the CWD (monorepo support)
-- [ ] **Auto-approve tools in sandbox** — when `sandbox: true`, automatically pass `--approval-mode yolo` so Gemini can execute code without blocking on tool confirmations in the isolated environment
+- [x] **Include additional directories** — expose `--include-directories <dirs>` via a new `includeDirs` string array parameter. Lets users point Gemini at code outside the CWD (monorepo support) (ADR-022)
 - [ ] **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Enables live content streaming instead of "still working..." keepalive messages
 
 ## Priority 4: Features from Community PRs

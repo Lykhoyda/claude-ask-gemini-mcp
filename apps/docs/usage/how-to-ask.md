@@ -32,6 +32,7 @@ The core tool that sends your prompts and context to the Gemini API.
 - `sandbox` (optional): Set to `true` to run your prompt inside Gemini's isolated code execution sandbox (`-s` flag).
 - `changeMode` (optional): Set to `true` to strongly encourage Gemini to format its output as structured code edits.
 - `sessionId` (optional): Resume a previous conversation. Pass the session ID from a prior response to continue a [multi-turn session](/usage/multi-turn-sessions).
+- `includeDirs` (optional): An array of additional directory paths to include in Gemini's context via `--include-directories`. Useful for monorepos where the code you want analyzed lives outside the current working directory (e.g., `["packages/api", "packages/shared"]`).
 
 ### `fetch-chunk`
 Used automatically by your AI client. When Gemini returns a response larger than a single MCP message allows, it is cached. The AI uses this tool to paginate through the rest of the response.

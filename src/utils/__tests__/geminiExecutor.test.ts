@@ -529,3 +529,86 @@ describe("executeGeminiCLI stats format (real CLI shape)", () => {
     expect(result.response).not.toContain("[Gemini stats:");
   });
 });
+
+describe("executeGeminiCLI includeDirs support", () => {
+  it("includes --include-directories flag for each dir with correct pairing", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ response: "ok" }));
+
+    await executeGeminiCLI({ prompt: "hello", includeDirs: ["packages/api", "packages/shared"] });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    const firstIdx = args.indexOf(CLI.FLAGS.INCLUDE_DIRECTORIES);
+    expect(args[firstIdx + 1]).toBe("packages/api");
+    const secondIdx = args.indexOf(CLI.FLAGS.INCLUDE_DIRECTORIES, firstIdx + 1);
+    expect(args[secondIdx + 1]).toBe("packages/shared");
+  });
+
+  it("does not include --include-directories when empty array", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ response: "ok" }));
+
+    await executeGeminiCLI({ prompt: "hello", includeDirs: [] });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    expect(args).not.toContain(CLI.FLAGS.INCLUDE_DIRECTORIES);
+  });
+
+  it("places --include-directories before --output-format", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ response: "ok" }));
+
+    await executeGeminiCLI({ prompt: "hello", includeDirs: ["packages/api"] });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    const includeIdx = args.indexOf(CLI.FLAGS.INCLUDE_DIRECTORIES);
+    const outputFormatIdx = args.indexOf(CLI.FLAGS.OUTPUT_FORMAT);
+    expect(includeIdx).toBeLessThan(outputFormatIdx);
+  });
+
+  it("does not include --include-directories when undefined", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ response: "ok" }));
+
+    await executeGeminiCLI({ prompt: "hello" });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    expect(args).not.toContain(CLI.FLAGS.INCLUDE_DIRECTORIES);
+  });
+
+  it("preserves includeDirs in fallback args on quota exceeded", async () => {
+    mockExecuteCommand
+      .mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED"))
+      .mockResolvedValueOnce(JSON.stringify({ response: "ok" }));
+
+    await executeGeminiCLI({ prompt: "hello", includeDirs: ["packages/api"] });
+
+    const [, fallbackArgs] = mockExecuteCommand.mock.calls[1];
+    const includeIdx = fallbackArgs.indexOf(CLI.FLAGS.INCLUDE_DIRECTORIES);
+    expect(includeIdx).toBeGreaterThan(-1);
+    expect(fallbackArgs[includeIdx + 1]).toBe("packages/api");
+  });
+
+  it("builds correct full args with model, sandbox, sessionId, and includeDirs", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(JSON.stringify({ response: "ok" }));
+
+    await executeGeminiCLI({
+      prompt: "hello",
+      model: "gemini-3-flash-preview",
+      sandbox: true,
+      sessionId: "abc-123",
+      includeDirs: ["packages/api"],
+    });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    expect(args).toEqual([
+      CLI.FLAGS.MODEL,
+      "gemini-3-flash-preview",
+      CLI.FLAGS.SANDBOX,
+      CLI.FLAGS.RESUME,
+      "abc-123",
+      CLI.FLAGS.INCLUDE_DIRECTORIES,
+      "packages/api",
+      CLI.FLAGS.OUTPUT_FORMAT,
+      CLI.OUTPUT_FORMATS.JSON,
+      CLI.FLAGS.PROMPT,
+      "hello",
+    ]);
+  });
+});

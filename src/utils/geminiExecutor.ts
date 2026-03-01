@@ -36,6 +36,7 @@ export interface GeminiExecutorOptions {
   sandbox?: boolean;
   changeMode?: boolean;
   sessionId?: string;
+  includeDirs?: string[];
   onProgress?: (newOutput: string) => void;
 }
 
@@ -152,18 +153,24 @@ function buildArgs(
   model: string | undefined,
   sandbox: boolean | undefined,
   sessionId: string | undefined,
+  includeDirs: string[] | undefined,
 ): string[] {
   const args: string[] = [];
   if (model) args.push(CLI.FLAGS.MODEL, model);
   if (sandbox) args.push(CLI.FLAGS.SANDBOX);
   if (sessionId) args.push(CLI.FLAGS.RESUME, sessionId);
+  if (includeDirs?.length) {
+    for (const dir of includeDirs) {
+      args.push(CLI.FLAGS.INCLUDE_DIRECTORIES, dir);
+    }
+  }
   args.push(CLI.FLAGS.OUTPUT_FORMAT, CLI.OUTPUT_FORMATS.JSON);
   args.push(CLI.FLAGS.PROMPT, prompt);
   return args;
 }
 
 export async function executeGeminiCLI(options: GeminiExecutorOptions): Promise<GeminiExecutorResult> {
-  const { model, sandbox, changeMode, sessionId, onProgress } = options;
+  const { model, sandbox, changeMode, sessionId, includeDirs, onProgress } = options;
   let prompt_processed = options.prompt;
 
   if (changeMode) {
@@ -232,7 +239,7 @@ ${prompt_processed}
     prompt_processed = changeModeInstructions;
   }
 
-  const args = buildArgs(prompt_processed, model, sandbox, sessionId);
+  const args = buildArgs(prompt_processed, model, sandbox, sessionId, includeDirs);
 
   try {
     const raw = await executeCommand(CLI.COMMANDS.GEMINI, args, onProgress);
@@ -242,7 +249,7 @@ ${prompt_processed}
     if (errorMessage.includes(ERROR_MESSAGES.QUOTA_EXCEEDED) && model !== MODELS.FLASH) {
       Logger.warn(`${ERROR_MESSAGES.QUOTA_EXCEEDED}. Falling back to ${MODELS.FLASH}.`);
       Logger.debug(`Status: ${STATUS_MESSAGES.FLASH_RETRY}`);
-      const fallbackArgs = buildArgs(prompt_processed, MODELS.FLASH, sandbox, sessionId);
+      const fallbackArgs = buildArgs(prompt_processed, MODELS.FLASH, sandbox, sessionId, includeDirs);
       try {
         const raw = await executeCommand(CLI.COMMANDS.GEMINI, fallbackArgs, onProgress);
         Logger.warn(`Successfully executed with ${MODELS.FLASH} fallback.`);

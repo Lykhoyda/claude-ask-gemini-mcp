@@ -34,6 +34,12 @@ const askGeminiArgsSchema = z.object({
     .describe(
       "Resume a previous Gemini conversation. Pass the session_id from a prior ask-gemini response to continue a multi-turn exchange with full context.",
     ),
+  includeDirs: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Additional directories to include in Gemini's context via --include-directories. Useful for monorepos where the code you want analyzed lives outside the current working directory.",
+    ),
   chunkIndex: z.union([z.number(), z.string()]).optional().describe("Which chunk to return (1-based)"),
   chunkCacheKey: z.string().optional().describe("Optional cache key for continuation"),
 });
@@ -41,7 +47,7 @@ const askGeminiArgsSchema = z.object({
 export const askGeminiTool: UnifiedTool = {
   name: "ask-gemini",
   description:
-    "Send a prompt to Gemini CLI (defaults to gemini-3.1-pro-preview with automatic Flash fallback on quota errors). Supports sandbox mode [-s], changeMode for structured edits, and multi-turn sessions via sessionId. Do not override the model parameter unless the user explicitly asks.",
+    "Send a prompt to Gemini CLI (defaults to gemini-3.1-pro-preview with automatic Flash fallback on quota errors). Supports sandbox mode [-s], changeMode for structured edits, multi-turn sessions via sessionId, and additional directory context via includeDirs. Do not override the model parameter unless the user explicitly asks.",
   zodSchema: askGeminiArgsSchema,
   prompt: {
     description:
@@ -49,7 +55,7 @@ export const askGeminiTool: UnifiedTool = {
   },
   category: "gemini",
   execute: async (args, onProgress) => {
-    const { prompt, model, sandbox, changeMode, sessionId, chunkIndex, chunkCacheKey } = args;
+    const { prompt, model, sandbox, changeMode, sessionId, includeDirs, chunkIndex, chunkCacheKey } = args;
     if (!prompt?.trim()) {
       throw new Error(ERROR_MESSAGES.NO_PROMPT_PROVIDED);
     }
@@ -64,6 +70,7 @@ export const askGeminiTool: UnifiedTool = {
       sandbox: !!sandbox,
       changeMode: !!changeMode,
       sessionId: sessionId as string | undefined,
+      includeDirs: includeDirs as string[] | undefined,
       onProgress,
     });
 

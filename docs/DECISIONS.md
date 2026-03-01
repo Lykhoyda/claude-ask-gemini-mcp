@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-022: Include Additional Directories via --include-directories
+- **Date:** 2026-02-27
+- **Status:** Accepted
+- **Context:** Gemini CLI supports `--include-directories <path>` to extend its file access beyond the current working directory. This is the primary way to support monorepos where relevant code lives in sibling packages. The flag can be repeated for multiple directories.
+- **Decision:** Add `includeDirs?: string[]` as an optional array parameter to `ask-gemini`. In `buildArgs()`, emit one `--include-directories <dir>` pair per entry (repeated-flag form, avoiding comma-in-path edge cases). No upper limit enforced — the CLI enforces its own constraints. Parameter forwarded in both primary and quota-fallback call paths.
+- **Consequences:** Users can point Gemini at multiple directories outside CWD. 94 tests pass.
+
 ## ADR-021: Multi-Turn Session Support via --resume
 - **Date:** 2026-02-26
 - **Status:** Accepted
