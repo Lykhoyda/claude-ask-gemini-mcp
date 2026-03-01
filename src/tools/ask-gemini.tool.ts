@@ -49,6 +49,13 @@ export const askGeminiTool: UnifiedTool = {
   description:
     "Send a prompt to Gemini CLI (defaults to gemini-3.1-pro-preview with automatic Flash fallback on quota errors). Supports sandbox mode [-s], changeMode for structured edits, multi-turn sessions via sessionId, and additional directory context via includeDirs. Do not override the model parameter unless the user explicitly asks.",
   zodSchema: askGeminiArgsSchema,
+  annotations: {
+    title: "Ask Gemini",
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
   prompt: {
     description:
       "Execute 'gemini -p <prompt>' to get Gemini AI's response. Supports enhanced change mode for structured edit suggestions.",

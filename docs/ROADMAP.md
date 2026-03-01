@@ -22,10 +22,9 @@ As a user, I want the MCP server to expose more Gemini CLI capabilities so I get
 - [x] **Structured JSON output** — pass `--output-format json` to get `{ response, stats, error }` back from Gemini instead of raw text. Gives token usage stats, structured errors, and cleaner response parsing (ADR-019)
 - [x] **Multi-turn session support** — expose `--resume <sessionId>` via a new `sessionId` parameter. Return the session ID in responses so Claude can continue conversations with Gemini across multiple tool calls (ADR-021)
 - [x] **Include additional directories** — expose `--include-directories <dirs>` via a new `includeDirs` string array parameter. Lets users point Gemini at code outside the CWD (monorepo support) (ADR-022)
-- [ ] **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Enables live content streaming instead of "still working..." keepalive messages
 
 ## Priority 4: Features from Community PRs
-- [ ] MCP tool annotations per spec (upstream PR #46)
+- [x] MCP tool annotations per spec (upstream PR #46) (ADR-023)
 - [ ] LRU response caching with performance optimizations (upstream PR #44)
 - [ ] Gemini API compatibility mode (upstream PR #35)
 - [x] Update default model to `gemini-3.1-pro-preview` (upstream PR #54)
@@ -99,3 +98,6 @@ Deferred until Gemini CLI improvements (Priority 3) are complete.
 - [x] Fix Smithery CJS bundling: `createRequire(import.meta.url)` crash, add `createSandboxServer()` export, separate CLI entry point (ADR-017)
 - [x] Fix `npx` bin resolution: renamed bin from `gemini-mcp` to `ask-gemini-mcp` to match package name
 - [x] Prevent AI clients from using outdated models: updated tool/param descriptions to discourage model override
+
+## Undecided / Potential Improvements
+- **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Would replace keepalive messages with live content streaming. High complexity, no user demand yet.

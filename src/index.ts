@@ -101,7 +101,7 @@ for (const tool of toolRegistry) {
 
   server.registerTool(
     tool.name,
-    { description: tool.description, inputSchema: shape },
+    { description: tool.description, inputSchema: shape, annotations: tool.annotations },
     async (args: Record<string, unknown>, extra: ToolExtra): Promise<CallToolResult> => {
       const toolName = tool.name;
       const progressData = startProgressUpdates(toolName, extra);

@@ -1,3 +1,4 @@
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { ZodTypeAny } from "zod";
 import { ZodError } from "zod";
 import type { ToolArguments } from "../constants.js";
@@ -6,6 +7,7 @@ export interface UnifiedTool {
   name: string;
   description: string;
   zodSchema: ZodTypeAny;
+  annotations?: ToolAnnotations;
 
   prompt?: {
     description: string;

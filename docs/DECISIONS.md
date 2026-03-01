@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-023: MCP Tool Annotations
+- **Date:** 2026-03-01
+- **Status:** Accepted
+- **Context:** The MCP spec defines `ToolAnnotations` (title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint) to describe tool behavior to clients. SDK v1.27.0 supports annotations in `registerTool()`.
+- **Decision:** Add `annotations?: ToolAnnotations` to the `UnifiedTool` interface. Forward it to `server.registerTool()`. Set annotations on all 3 tools: `ask-gemini` (read-write, non-destructive, open-world), `fetch-chunk` (read-only, idempotent, closed-world), `ping` (read-only, idempotent, closed-world).
+- **Consequences:** MCP clients can make informed decisions about tool auto-approval and risk levels. No behavioral changes.
+
 ## ADR-022: Include Additional Directories via --include-directories
 - **Date:** 2026-02-27
 - **Status:** Accepted

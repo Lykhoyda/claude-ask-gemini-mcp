@@ -10,6 +10,12 @@ export const pingTool: UnifiedTool = {
   name: "ping",
   description: "Test connectivity with the MCP server",
   zodSchema: pingArgsSchema,
+  annotations: {
+    title: "Ping",
+    readOnlyHint: true,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
   prompt: {
     description: "Echo test message to verify MCP server is working",
   },
