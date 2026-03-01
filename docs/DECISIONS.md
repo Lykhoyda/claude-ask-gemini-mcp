@@ -1,5 +1,13 @@
 # Architectural Decisions
 
+## ADR-024: MCP vs Skill vs Subagent Context Comparison Experiment
+- **Date:** 2026-03-01
+- **Status:** Informational
+- **Context:** To understand how different Claude Code invocation methods affect Gemini's code review quality, we ran the same code review task through three approaches: MCP tool call (structured template with explicit instructions), Skill (markdown skill file with checklist), and Subagent (general-purpose agent with natural language prompt). Each approach produced a review of the same `geminiExecutor.ts` file.
+- **Finding:** Prompt structure inversely correlates with Gemini thinking tokens. The structured MCP template (explicit fields, numbered instructions) produced 6,666 thinking tokens in 74s. The Skill approach (markdown checklist) produced 8,942 thinking tokens in 118s. The raw Subagent prompt (unstructured natural language) produced 16,617 thinking tokens in 212s — 2.5x more thinking than MCP for comparable review quality.
+- **Decision:** Document findings for future prompt engineering decisions. All three approaches found the same three actionable bugs (extractJson greedy first-match, extractJson escape-outside-string, missing thinking tokens in formatStats), suggesting review quality is consistent regardless of thinking token count.
+- **Consequences:** When optimizing for speed/cost, prefer structured prompts with explicit output format instructions. When optimizing for thoroughness on novel problems, less-structured prompts may explore more reasoning paths. No code changes from this ADR.
+
 ## ADR-023: MCP Tool Annotations
 - **Date:** 2026-03-01
 - **Status:** Accepted

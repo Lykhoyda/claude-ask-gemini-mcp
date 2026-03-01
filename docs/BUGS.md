@@ -30,6 +30,23 @@
 - **Upstream:** Issue #39
 - **Description:** Published version has no release notes or changelog entry.
 
+## Bugs Found via Code Review Experiment (ADR-024)
+
+### ~~extractJson greedy first-match~~ FIXED
+- **Severity:** Medium
+- **Description:** `extractJson` returned the first valid JSON object found in Gemini CLI output, even if it was debug output (e.g., `{"retry":true}`) rather than the actual Gemini response. This could cause silent data loss when CLI debug lines contain JSON objects before the real response.
+- **Fix:** After `JSON.parse` succeeds, check if parsed object has `response` or `error` field (Gemini-shaped). If not, save as fallback and continue searching. Return fallback only if no Gemini-shaped JSON found.
+
+### ~~extractJson escape outside strings~~ FIXED
+- **Severity:** Low
+- **Description:** The `extractJson` parser tracked escape sequences (`\`) globally, not just inside JSON strings. A backslash in prefix text (e.g., Windows paths like `C:\new\file`) would set `escapeNext = true`, causing the next character to be skipped and corrupting brace/quote tracking.
+- **Fix:** Changed escape detection from `if (char === "\\")` to `if (inString && char === "\\")`.
+
+### ~~Thinking tokens not displayed in stats footer~~ FIXED
+- **Severity:** Low
+- **Description:** The `GeminiModelTokens` interface included a `thoughts` field and the Gemini CLI returns thinking token counts, but `formatStats` never displayed them. Users had no visibility into how many thinking tokens Gemini used.
+- **Fix:** Added `if (tokens.thoughts != null && tokens.thoughts > 0) parts.push(...)` to `formatStats`, displayed between output tokens and cached count.
+
 ## ~~Code Quality Issues (from utils/ audit)~~ ALL FIXED
 
 All 10 code quality issues identified in the utils/ audit have been resolved:

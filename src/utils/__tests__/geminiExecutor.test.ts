@@ -346,7 +346,8 @@ describe("executeGeminiCLI JSON output format", () => {
 
     const result = await executeGeminiCLI({ prompt: "hello" });
 
-    expect(result.response).toContain("real response");
+    expect(result.response).toBe("real response");
+    expect(result.response).not.toContain("[Debug]");
   });
 
   it("throws array error with stringified details", async () => {
@@ -356,6 +357,33 @@ describe("executeGeminiCLI JSON output format", () => {
     await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow(
       'Gemini error: [{"message":"Rate limited"},{"message":"Quota exceeded"}]',
     );
+  });
+
+  it("skips non-Gemini JSON objects in prefix to find actual response", async () => {
+    const output = '{"retry":true}\n{"response":"answer","session_id":"abc"}';
+    mockExecuteCommand.mockResolvedValueOnce(output);
+
+    const result = await executeGeminiCLI({ prompt: "hello" });
+
+    expect(result.response).toBe("answer");
+    expect(result.sessionId).toBe("abc");
+  });
+
+  it("handles backslash in prefix text before JSON", async () => {
+    const output = 'C:\\new\\file\n{"response":"ok"}';
+    mockExecuteCommand.mockResolvedValueOnce(output);
+
+    const result = await executeGeminiCLI({ prompt: "hello" });
+
+    expect(result.response).toBe("ok");
+  });
+
+  it("falls back to first valid JSON when no response/error field found", async () => {
+    mockExecuteCommand.mockResolvedValueOnce('prefix {"unknown":"format"} suffix');
+
+    const result = await executeGeminiCLI({ prompt: "hello" });
+
+    expect(result.response).toBe('prefix {"unknown":"format"} suffix');
   });
 });
 
@@ -511,6 +539,44 @@ describe("executeGeminiCLI stats format (real CLI shape)", () => {
     const result = await executeGeminiCLI({ prompt: "hello" });
 
     expect(result.response).not.toContain("cached");
+  });
+
+  it("includes thinking token count when non-zero", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(
+      JSON.stringify({
+        response: "answer",
+        stats: {
+          models: {
+            "gemini-3.1-pro-preview": {
+              tokens: { input: 1000, candidates: 50, cached: 0, thoughts: 6666 },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await executeGeminiCLI({ prompt: "hello" });
+
+    expect(result.response).toContain("6,666 thinking tokens");
+  });
+
+  it("omits thinking token count when zero", async () => {
+    mockExecuteCommand.mockResolvedValueOnce(
+      JSON.stringify({
+        response: "answer",
+        stats: {
+          models: {
+            "gemini-3.1-pro-preview": {
+              tokens: { input: 1000, candidates: 50, cached: 0, thoughts: 0 },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await executeGeminiCLI({ prompt: "hello" });
+
+    expect(result.response).not.toContain("thinking");
   });
 
   it("returns empty stats footer when stats.models is missing", async () => {

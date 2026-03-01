@@ -22,6 +22,7 @@ As a user, I want the MCP server to expose more Gemini CLI capabilities so I get
 - [x] **Structured JSON output** — pass `--output-format json` to get `{ response, stats, error }` back from Gemini instead of raw text. Gives token usage stats, structured errors, and cleaner response parsing (ADR-019)
 - [x] **Multi-turn session support** — expose `--resume <sessionId>` via a new `sessionId` parameter. Return the session ID in responses so Claude can continue conversations with Gemini across multiple tool calls (ADR-021)
 - [x] **Include additional directories** — expose `--include-directories <dirs>` via a new `includeDirs` string array parameter. Lets users point Gemini at code outside the CWD (monorepo support) (ADR-022)
+- [x] **Expose thinking tokens in stats** — display Gemini thinking token count in the stats footer between output tokens and cached count
 
 ## Priority 4: Features from Community PRs
 - [x] MCP tool annotations per spec (upstream PR #46) (ADR-023)
@@ -98,6 +99,9 @@ Deferred until Gemini CLI improvements (Priority 3) are complete.
 - [x] Fix Smithery CJS bundling: `createRequire(import.meta.url)` crash, add `createSandboxServer()` export, separate CLI entry point (ADR-017)
 - [x] Fix `npx` bin resolution: renamed bin from `gemini-mcp` to `ask-gemini-mcp` to match package name
 - [x] Prevent AI clients from using outdated models: updated tool/param descriptions to discourage model override
+- [x] Expose thinking tokens in `formatStats` stats footer
+- [x] Fix `extractJson` greedy first-match bug — now prefers Gemini-shaped JSON (`response`/`error` fields)
+- [x] Fix `extractJson` escape-outside-string bug — backslash escapes now only tracked inside JSON strings
 
 ## Undecided / Potential Improvements
 - **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Would replace keepalive messages with live content streaming. High complexity, no user demand yet.

@@ -53,6 +53,8 @@ function formatStats(stats: GeminiCliStats | undefined): string {
     if (!tokens) continue;
     if (tokens.input != null) parts.push(`${tokens.input.toLocaleString()} input tokens`);
     if (tokens.candidates != null) parts.push(`${tokens.candidates.toLocaleString()} output tokens`);
+    if (tokens.thoughts != null && tokens.thoughts > 0)
+      parts.push(`${tokens.thoughts.toLocaleString()} thinking tokens`);
     if (tokens.cached != null && tokens.cached > 0) parts.push(`${tokens.cached.toLocaleString()} cached`);
     parts.push(`model: ${modelName}`);
   }
@@ -61,6 +63,7 @@ function formatStats(stats: GeminiCliStats | undefined): string {
 
 function extractJson(raw: string): string | null {
   let startIndex = raw.indexOf("{");
+  let fallback: string | null = null;
 
   while (startIndex !== -1) {
     let braceCount = 0;
@@ -73,7 +76,7 @@ function extractJson(raw: string): string | null {
         escapeNext = false;
         continue;
       }
-      if (char === "\\") {
+      if (inString && char === "\\") {
         escapeNext = true;
         continue;
       }
@@ -88,11 +91,21 @@ function extractJson(raw: string): string | null {
         if (braceCount === 0) {
           const candidate = raw.slice(startIndex, i + 1);
           try {
-            JSON.parse(candidate);
+            const parsed = JSON.parse(candidate);
             if (startIndex > 0) {
               Logger.debug("Skipping non-JSON prefix in Gemini output");
             }
-            return candidate;
+            if (
+              parsed &&
+              typeof parsed === "object" &&
+              !Array.isArray(parsed) &&
+              ("response" in parsed || "error" in parsed)
+            ) {
+              return candidate;
+            }
+            if (fallback === null) {
+              fallback = candidate;
+            }
           } catch {
             break;
           }
@@ -101,7 +114,7 @@ function extractJson(raw: string): string | null {
     }
     startIndex = raw.indexOf("{", startIndex + 1);
   }
-  return null;
+  return fallback;
 }
 
 function parseGeminiJsonOutput(raw: string): GeminiExecutorResult {
