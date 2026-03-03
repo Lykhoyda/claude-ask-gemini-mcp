@@ -11,12 +11,12 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
-      issues: read
-      actions: read
 
     steps:
       - name: Checkout base branch
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
 
       - name: Run Claude Code Review
         id: claude-review
@@ -25,6 +25,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           use_sticky_comment: true
+          track_progress: true
           allowed_non_write_users: "*"
           prompt: |
             You are reviewing a PR for ask-gemini-mcp, a TypeScript MCP server that bridges
