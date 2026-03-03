@@ -13,18 +13,12 @@
 - [ ] LRU response caching with performance optimizations (upstream PR #44)
 - [ ] Gemini API compatibility mode (upstream PR #35)
 
-## Priority 5: Open Issues
-- [ ] Fix excessive token responses for small prompts (upstream Issues #6, #26)
-
 ## Priority 7: Distribution & Discovery
-- [ ] Submit to awesome-mcp-servers list
-- [ ] Submit to mcp.so and mcpservers.org directories
 - [ ] Add OpenGraph metadata and badges to README for better link previews
 - [ ] Publish blog post / dev.to article about the tool and AI-to-AI collaboration pattern
 - [ ] Add to MCP client directories (Cursor, Windsurf, Cline marketplace listings)
 
 ## Priority 8: Multi-LLM Support (ask-llm-mcp) — ADR-020
-
 - [ ] **Phase 1: Monorepo restructure** — yarn workspaces, move src/ → packages/ask-gemini/, extract shared code → packages/shared/
 - [ ] **Phase 2: Codex provider** — packages/ask-codex/, codexExecutor with quiet mode, default to latest model
 - [ ] **Phase 3: Orchestrator** — packages/ask-llm/, imports all provider tools, isAvailable() gating, publish ask-llm-mcp
@@ -54,8 +48,9 @@
 - [x] MCP tool annotations per spec (upstream PR #46) (ADR-023)
 - [x] Update default model to `gemini-3.1-pro-preview` (upstream PR #54)
 
-### Priority 5: Open Issues (partial)
+### Priority 5: Open Issues (all resolved)
 - [x] ~~Allow model configuration via MCP JSON settings~~ (upstream Issue #49) — Won't fix: per-call `model` param already exists; Gemini CLI picks its own default
+- [x] ~~Fix excessive token responses for small prompts~~ (upstream Issues #6, #26) — Won't fix: root cause was `gemini-2.5-pro` model bug (always returned ~45k tokens); mitigated by changing default to `gemini-3.1-pro-preview`. Gemini CLI has no `--max-output-tokens` flag.
 - [x] Add automated test suite (Vitest, 99 tests across 6 files, ADR-014)
 - [x] Set up linter and formatter (Biome v2.4.4)
 
@@ -77,6 +72,8 @@
 - [x] Add GitHub Release with changelog in release workflow
 - [x] Improve npm discoverability: added keywords
 - [x] Document global (user-scope) install option in README
+- [x] Submit to awesome-mcp-servers list (PR [#2581](https://github.com/punkpeye/awesome-mcp-servers/pull/2581))
+- [x] Submit to mcp.so and mcpservers.org directories
 
 ### Other Completed
 - [x] Remove non-core tools (`brainstorm`, `help`, `timeout-test`) per ADR-004
