@@ -30,6 +30,12 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Checkout PR branch (for fork PRs)
+        if: github.event.issue.pull_request
+        run: gh pr checkout ${{ github.event.issue.number }} --force
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
