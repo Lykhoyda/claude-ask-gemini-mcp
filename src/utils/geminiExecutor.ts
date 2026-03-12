@@ -252,7 +252,7 @@ ${prompt_processed}
     prompt_processed = changeModeInstructions;
   }
 
-  const args = buildArgs(prompt_processed, model, sandbox, sessionId, includeDirs);
+  const args = buildArgs(prompt_processed, model || MODELS.PRO, sandbox, sessionId, includeDirs);
 
   try {
     const raw = await executeCommand(CLI.COMMANDS.GEMINI, args, onProgress);

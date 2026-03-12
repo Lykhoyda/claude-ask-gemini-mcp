@@ -47,7 +47,14 @@ describe("executeGeminiCLI argument construction", () => {
 
     const [cmd, args] = mockExecuteCommand.mock.calls[0];
     expect(cmd).toBe(CLI.COMMANDS.GEMINI);
-    expect(args).toEqual([CLI.FLAGS.OUTPUT_FORMAT, CLI.OUTPUT_FORMATS.JSON, CLI.FLAGS.PROMPT, "hello"]);
+    expect(args).toEqual([
+      CLI.FLAGS.MODEL,
+      MODELS.PRO,
+      CLI.FLAGS.OUTPUT_FORMAT,
+      CLI.OUTPUT_FORMATS.JSON,
+      CLI.FLAGS.PROMPT,
+      "hello",
+    ]);
   });
 
   it("includes -m flag when model is specified", async () => {
@@ -69,6 +76,8 @@ describe("executeGeminiCLI argument construction", () => {
 
     const [, args] = mockExecuteCommand.mock.calls[0];
     expect(args).toEqual([
+      CLI.FLAGS.MODEL,
+      MODELS.PRO,
       CLI.FLAGS.SANDBOX,
       CLI.FLAGS.OUTPUT_FORMAT,
       CLI.OUTPUT_FORMATS.JSON,
