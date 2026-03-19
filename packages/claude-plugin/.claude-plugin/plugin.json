@@ -1,0 +1,12 @@
+{
+  "name": "ask-gemini",
+  "version": "0.1.0",
+  "description": "AI-to-AI collaboration — get second opinions from Gemini on code reviews, architecture plans, and diffs",
+  "author": {
+    "name": "Lykhoyda",
+    "url": "https://github.com/Lykhoyda"
+  },
+  "repository": "https://github.com/Lykhoyda/ask-llm",
+  "license": "MIT",
+  "keywords": ["gemini", "code-review", "ai-collaboration", "second-opinion"]
+}

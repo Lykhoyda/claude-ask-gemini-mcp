@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-027: Claude Code Plugin — Implementation of ADR-018
+- **Date:** 2026-03-19
+- **Status:** Accepted (implements ADR-018)
+- **Context:** ADR-018 approved a hybrid multi-entrypoint architecture for the Claude Code plugin. This ADR documents the implementation decisions made during build-out in the `packages/claude-plugin` workspace package.
+- **Decision:** Implemented 8 files across the plugin package: (1) `src/run.ts` — direct CLI binary that imports `executeGeminiCLI` via a new subpath export `ask-gemini-mcp/executor`. Reads stdin for piped diffs, joins CLI args and stdin with `filter(Boolean).join("\n\n")` to avoid leading newlines. Uses `console.error` instead of Logger to minimize dependency surface. (2) `agents/gemini-reviewer.md` — subagent with structured review prompt template and output format. (3) `skills/gemini-review/SKILL.md` — delegates to the gemini-reviewer agent to avoid prompt duplication (single source of truth). (4) `hooks/hooks.json` — Stop hook using `git diff HEAD --quiet` exit code (not fragile string matching) and `${CLAUDE_PLUGIN_ROOT}/dist/run.js` for PATH-independent binary resolution. (5) `.claude-plugin/plugin.json` — plugin manifest. (6) `.mcp.json` — MCP server config using `npx -y ask-gemini-mcp`. The subpath export in `gemini-mcp/package.json` uses the object form `{ types, default }` for proper TypeScript resolution under `moduleResolution: Node16`.
+- **Consequences:** Plugin is installable via `claude plugin install`. MCP context (subagent, skill) and shell context (hooks) share the same core executor logic. Pre-commit hook implemented as a `PreToolUse` hook on the `Bash` tool — reads tool input from stdin, checks for `git commit` via grep, reviews staged diff (`git diff --cached`) through `run.js`, outputs review to stderr (advisory, exit 0 = never blocks). Same secret filtering and size cap (50KB) as the Stop hook.
+
 ## ADR-026: Yarn Workspaces Monorepo Restructure
 - **Date:** 2026-03-18
 - **Status:** Accepted (implements ADR-020)
@@ -164,7 +171,7 @@
 
 ## ADR-018: Claude Code Plugin — Hybrid Multi-Entrypoint Architecture
 - **Date:** 2026-02-25
-- **Status:** Approved, not yet implemented
+- **Status:** Accepted (implemented in ADR-027)
 - **Context:** We want a Claude Code plugin for automated Gemini code reviews (pre-commit hook, Stop hook, on-demand skill, isolated subagent). The core question was whether to reuse code from the existing MCP server. Hooks run as shell commands and have no MCP client, so they can't call MCP tools directly.
 - **Decision:** Hybrid multi-entrypoint approach. Add a second CLI binary `ask-gemini-run` (`src/run.ts`) that calls `executeGeminiCLI()` directly and prints to stdout. The plugin uses MCP tools for AI-context interactions (subagent, skill) and the direct CLI for shell-context interactions (hooks). Both entry points share the same core logic (`geminiExecutor.ts`). No monorepo needed — just two `bin` entries in `package.json`. Rejected: MCP-only (hooks can't use MCP), Bash-only (duplicates hardened logic), monorepo (overkill).
 - **Consequences:** Zero logic duplication. Hooks get the same model fallback, quota handling, and chunking as the MCP server. Plugin is mostly markdown/config (~3 files). The `ask-gemini-run` binary also serves as a standalone CLI for users who want Gemini access without MCP.

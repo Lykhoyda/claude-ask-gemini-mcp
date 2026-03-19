@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git diff HEAD --quiet 2>/dev/null; rc=$?; if [ \"$rc\" -eq 1 ]; then git diff HEAD -- ':!*.env*' ':!*.key' ':!*.pem' ':!*credentials*' ':!*secret*' ':!*.lock' | head -c 51200 | node \"${CLAUDE_PLUGIN_ROOT}/dist/run.js\" 'Briefly review these session changes for any critical issues. Be concise — 3 bullets max.'; fi"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); echo \"$input\" | grep -q 'git commit' || exit 0; staged=$(git diff --cached -- ':!*.env*' ':!*.key' ':!*.pem' ':!*credentials*' ':!*secret*' ':!*.lock' 2>/dev/null); [ -z \"$staged\" ] && exit 0; echo \"$staged\" | head -c 51200 | node \"${CLAUDE_PLUGIN_ROOT}/dist/run.js\" 'Review these staged changes about to be committed. Flag only critical issues that should block the commit. Be concise — 3 bullets max.' >&2; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}

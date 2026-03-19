@@ -4,13 +4,20 @@
   "private": true,
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "ask-gemini-run": "dist/run.js"
+  },
   "scripts": {
     "build": "tsc -b",
     "test": "echo 'No tests yet'",
     "lint": "biome check src/ && tsc --noEmit"
   },
   "dependencies": {
-    "@ask-llm/shared": "workspace:*"
+    "@ask-llm/shared": "workspace:*",
+    "ask-gemini-mcp": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",

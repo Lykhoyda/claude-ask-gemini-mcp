@@ -219,7 +219,10 @@ __metadata:
     "@ask-llm/shared": "workspace:*"
     "@biomejs/biome": "npm:^2.4.4"
     "@types/node": "npm:^22.19.13"
+    ask-gemini-mcp: "workspace:*"
     typescript: "npm:^5.0.0"
+  bin:
+    ask-gemini-run: dist/run.js
   languageName: unknown
   linkType: soft
 
@@ -1987,7 +1990,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ask-gemini-mcp@workspace:packages/gemini-mcp":
+"ask-gemini-mcp@workspace:*, ask-gemini-mcp@workspace:packages/gemini-mcp":
   version: 0.0.0-use.local
   resolution: "ask-gemini-mcp@workspace:packages/gemini-mcp"
   dependencies:

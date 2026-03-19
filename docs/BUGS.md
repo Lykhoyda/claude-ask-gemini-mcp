@@ -49,6 +49,33 @@
 - **Description:** The `GeminiModelTokens` interface included a `thoughts` field and the Gemini CLI returns thinking token counts, but `formatStats` never displayed them. Users had no visibility into how many thinking tokens Gemini used.
 - **Fix:** Added `if (tokens.thoughts != null && tokens.thoughts > 0) parts.push(...)` to `formatStats`, displayed between output tokens and cached count.
 
+## Claude Code Plugin — Known Limitations (from Gemini & Codex review)
+
+### Untracked files not included in Stop hook review
+- **Severity:** Medium
+- **File:** `packages/claude-plugin/hooks/hooks.json`
+- **Description:** `git diff HEAD` excludes untracked files. Sessions that only create new files get no review from the Stop hook. Accepted for v1 — reviewing diffs of existing files is the primary use case.
+
+### Stop hook blocks until Gemini returns
+- **Severity:** Medium
+- **File:** `packages/claude-plugin/hooks/hooks.json`
+- **Description:** The Stop hook runs synchronously, delaying session completion until Gemini responds. On large diffs this adds noticeable latency. Claude Code may not support `async` hooks yet — revisit when the platform adds support.
+
+### Subagent inherits all tools (over-privileged)
+- **Severity:** Low
+- **File:** `packages/claude-plugin/agents/gemini-reviewer.md`
+- **Description:** The gemini-reviewer subagent doesn't restrict its tool access. For a review-only agent, it has unnecessary write/edit capabilities. Low risk since the subagent runs in Claude's sandbox, but could be tightened by adding a `tools` allowlist if Claude Code supports it.
+
+### Hook command is POSIX-only
+- **Severity:** Low
+- **File:** `packages/claude-plugin/hooks/hooks.json`
+- **Description:** The shell command uses POSIX syntax (`if ! ...; then`, `2>/dev/null`, `${...}`). Won't work on Windows cmd.exe. Mirrors the broader platform gap — Claude Code hooks on Windows is an upstream concern.
+
+### Subagent doesn't handle large diffs gracefully
+- **Severity:** Low
+- **File:** `packages/claude-plugin/agents/gemini-reviewer.md`
+- **Description:** The review prompt template instructs the subagent to paste raw diffs into the Gemini prompt. For very large diffs, this could exceed Gemini's context window. Could be improved by instructing the subagent to use `fetch-chunk` or truncate.
+
 ## ~~Code Quality Issues (from utils/ audit)~~ ALL FIXED
 
 All 10 code quality issues identified in the utils/ audit have been resolved:

@@ -1,12 +1,6 @@
 # Roadmap
 
-## Priority 2: Claude Code Plugin
-- [ ] Add direct CLI binary `ask-gemini-run` (`src/run.ts`) — calls geminiExecutor directly, supports stdin piping
-- [ ] Create subagent `gemini-reviewer.md` — isolated Gemini review in separate context
-- [ ] Create `/gemini-review` skill — on-demand Gemini consultation
-- [ ] Add pre-commit hook — background Gemini review of staged diff
-- [ ] Add Stop hook — background Gemini review of session changes
-- [ ] Bundle as Claude Code plugin (`plugin.json`)
+## ~~Priority 2: Claude Code Plugin~~ ALL DONE
 - See [design doc](plans/2026-02-25-claude-code-plugin-design.md)
 
 ## Priority 4: Features from Community PRs
@@ -82,6 +76,15 @@
 - [x] Use `pull_request_target` for Claude auto-review to support fork PRs (ADR-025)
 - [x] Fix Claude workflow permissions (`contents: write`, `pull-requests: write`, `additional_permissions`)
 - [x] Add `labeled` trigger for `@claude` mentions on issue label events
+
+### Priority 2: Claude Code Plugin (all resolved)
+- [x] Add direct CLI binary `ask-gemini-run` (`src/run.ts`) — calls geminiExecutor directly, supports stdin piping
+- [x] Create subagent `gemini-reviewer.md` — isolated Gemini review in separate context
+- [x] Create `/gemini-review` skill — on-demand Gemini consultation via agent delegation
+- [x] Add Stop hook — background Gemini review of session changes
+- [x] Add pre-commit hook — PreToolUse hook on Bash, reviews staged diff via Gemini before `git commit`
+- [x] Bundle as Claude Code plugin (`plugin.json`, `.mcp.json`, agents, skills, hooks)
+- [x] Add subpath export `ask-gemini-mcp/executor` for direct executor access (ADR-027)
 
 ### Other Completed
 - [x] Remove non-core tools (`brainstorm`, `help`, `timeout-test`) per ADR-004
