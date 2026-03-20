@@ -1,0 +1,868 @@
+diff --git a/packages/codex-mcp/package.json b/packages/codex-mcp/package.json
+new file mode 100644
+index 0000000..566ccbb
+--- /dev/null
++++ b/packages/codex-mcp/package.json
+@@ -0,0 +1,75 @@
++{
++  "name": "ask-codex-mcp",
++  "version": "0.1.0",
++  "mcpName": "io.github.Lykhoyda/ask-codex",
++  "description": "MCP server for OpenAI Codex CLI integration - for Claude IDE and other IDEs",
++  "type": "module",
++  "main": "dist/index.js",
++  "exports": {
++    ".": "./dist/index.js",
++    "./executor": {
++      "types": "./dist/utils/codexExecutor.d.ts",
++      "default": "./dist/utils/codexExecutor.js"
++    },
++    "./register": "./dist/tools/index.js"
++  },
++  "bin": "dist/cli.js",
++  "scripts": {
++    "build": "tsc -b",
++    "start": "node dist/cli.js",
++    "dev": "tsc -b && node dist/cli.js",
++    "test": "vitest run",
++    "lint": "biome check src/ && tsc --noEmit",
++    "prepack": "mkdir -p node_modules/@ask-llm/shared && cp -r ../../packages/shared/dist node_modules/@ask-llm/shared/ && cp ../../packages/shared/package.json node_modules/@ask-llm/shared/"
++  },
++  "keywords": [
++    "mcp",
++    "mcp-server",
++    "modelcontextprotocol",
++    "codex",
++    "openai",
++    "openai-codex",
++    "claude",
++    "ai",
++    "ai-collaboration",
++    "llm",
++    "code-review",
++    "second-opinion"
++  ],
++  "author": "Lykhoyda",
++  "license": "MIT",
++  "repository": {
++    "type": "git",
++    "url": "git+https://github.com/Lykhoyda/ask-llm.git",
++    "directory": "packages/codex-mcp"
++  },
++  "bugs": {
++    "url": "https://github.com/Lykhoyda/ask-llm/issues"
++  },
++  "homepage": "https://github.com/Lykhoyda/ask-llm#readme",
++  "engines": {
++    "node": ">=20.0.0"
++  },
++  "files": [
++    "dist/",
++    "README.md",
++    "LICENSE"
++  ],
++  "dependencies": {
++    "@ask-llm/shared": "workspace:*",
++    "@modelcontextprotocol/sdk": "^1.27.1",
++    "zod": "^4.3.6"
++  },
++  "devDependencies": {
++    "@biomejs/biome": "^2.4.4",
++    "@types/node": "^22.19.13",
++    "typescript": "^5.0.0",
++    "vitest": "^4.0.18"
++  },
++  "publishConfig": {
++    "access": "public"
++  },
++  "bundledDependencies": [
++    "@ask-llm/shared"
++  ]
++}
+diff --git a/packages/codex-mcp/server.json b/packages/codex-mcp/server.json
+new file mode 100644
+index 0000000..5852486
+--- /dev/null
++++ b/packages/codex-mcp/server.json
+@@ -0,0 +1,22 @@
++{
++  "name": "ask-codex-mcp",
++  "description": "MCP server for OpenAI Codex CLI integration — ask Codex for code review, second opinions, and AI-to-AI collaboration",
++  "license": "MIT",
++  "repository": "https://github.com/Lykhoyda/ask-llm",
++  "package": {
++    "registry": "npm",
++    "name": "ask-codex-mcp",
++    "version": "0.1.0"
++  },
++  "tools": [
++    {
++      "name": "ask-codex",
++      "description": "Send a prompt to OpenAI Codex CLI for code review, analysis, or second opinions"
++    },
++    {
++      "name": "ping",
++      "description": "Test connectivity with the MCP server"
++    }
++  ],
++  "env": []
++}
+diff --git a/packages/codex-mcp/src/__tests__/smoke.test.ts b/packages/codex-mcp/src/__tests__/smoke.test.ts
+new file mode 100644
+index 0000000..84ff3ad
+--- /dev/null
++++ b/packages/codex-mcp/src/__tests__/smoke.test.ts
+@@ -0,0 +1,23 @@
++import { describe, expect, it } from "vitest";
++import { toolRegistry } from "../tools/index.js";
++
++describe("MCP server smoke test", () => {
++  const expectedTools = ["ask-codex", "ping"];
++
++  it("has exactly 2 tools registered", () => {
++    const toolNames = toolRegistry.map((t) => t.name);
++    expect(toolNames).toEqual(expect.arrayContaining(expectedTools));
++    expect(toolNames).toHaveLength(expectedTools.length);
++  });
++
++  for (const toolName of expectedTools) {
++    it(`tool "${toolName}" has required properties`, () => {
++      const tool = toolRegistry.find((t) => t.name === toolName);
++      expect(tool).toBeDefined();
++      expect(tool?.name).toBe(toolName);
++      expect(tool?.description).toBeTruthy();
++      expect(tool?.zodSchema).toBeDefined();
++      expect(typeof tool?.execute).toBe("function");
++    });
++  }
++});
+diff --git a/packages/codex-mcp/src/cli.ts b/packages/codex-mcp/src/cli.ts
+new file mode 100644
+index 0000000..de7515a
+--- /dev/null
++++ b/packages/codex-mcp/src/cli.ts
+@@ -0,0 +1,9 @@
++#!/usr/bin/env node
++
++import { Logger } from "@ask-llm/shared";
++import { startServer } from "./index.js";
++
++startServer().catch((error) => {
++  Logger.error("Fatal error:", error);
++  process.exit(1);
++});
+diff --git a/packages/codex-mcp/src/constants.ts b/packages/codex-mcp/src/constants.ts
+new file mode 100644
+index 0000000..35479e4
+--- /dev/null
++++ b/packages/codex-mcp/src/constants.ts
+@@ -0,0 +1,31 @@
++export const ERROR_MESSAGES = {
++  QUOTA_SIGNALS: ["rate_limit_exceeded", "quota_exceeded", "429", "insufficient_quota"],
++  NO_PROMPT_PROVIDED:
++    "Please provide a prompt for analysis. Ask general questions or describe the code you want reviewed.",
++  TOOL_NOT_FOUND: "not found in registry",
++} as const;
++
++export const STATUS_MESSAGES = {
++  QUOTA_SWITCHING: "Codex quota exceeded, switching to fallback model...",
++  FALLBACK_RETRY: "Retrying with fallback model...",
++  FALLBACK_SUCCESS: "Fallback model completed successfully",
++  CODEX_RESPONSE: "Codex response:",
++} as const;
++
++export const MODELS = {
++  DEFAULT: "gpt-5.4",
++  FALLBACK: "gpt-5.4-mini",
++} as const;
++
++export const CLI = {
++  COMMANDS: {
++    CODEX: "codex",
++    EXEC: "exec",
++  },
++  FLAGS: {
++    MODEL: "-m",
++    SKIP_GIT: "--skip-git-repo-check",
++    EPHEMERAL: "--ephemeral",
++    JSON: "--json",
++  },
++} as const;
+diff --git a/packages/codex-mcp/src/index.ts b/packages/codex-mcp/src/index.ts
+new file mode 100644
+index 0000000..ad6a52b
+--- /dev/null
++++ b/packages/codex-mcp/src/index.ts
+@@ -0,0 +1,178 @@
++import { createRequire } from "node:module";
++import type { BaseToolArguments } from "@ask-llm/shared";
++import { Logger, PROTOCOL } from "@ask-llm/shared";
++import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
++import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
++import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
++import type { CallToolResult, ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
++import type { z } from "zod";
++import { executeTool, getPromptMessage, toolRegistry } from "./tools/index.js";
++
++function readPackageJson(): { name: string; version: string } {
++  try {
++    const require = createRequire(import.meta.url);
++    return require("../package.json") as { name: string; version: string };
++  } catch {
++    return { name: "ask-codex-mcp", version: "0.0.0" };
++  }
++}
++
++const { name, version } = readPackageJson();
++
++type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
++
++const server = new McpServer({ name, version });
++
++let isProcessing = false;
++let currentOperationName = "";
++let latestOutput = "";
++
++async function sendProgressNotification(extra: ToolExtra, progress: number, total?: number, message?: string) {
++  const progressToken = extra._meta?.progressToken;
++  if (!progressToken) return;
++
++  try {
++    const params: Record<string, unknown> = { progressToken, progress };
++    if (total !== undefined) params.total = total;
++    if (message) params.message = message;
++
++    await extra.sendNotification({
++      method: PROTOCOL.NOTIFICATIONS.PROGRESS,
++      params,
++    } as ServerNotification);
++  } catch (error) {
++    Logger.error("Failed to send progress notification:", error);
++  }
++}
++
++function startProgressUpdates(operationName: string, extra: ToolExtra) {
++  isProcessing = true;
++  currentOperationName = operationName;
++  latestOutput = "";
++
++  const progressMessages = [
++    `${operationName} - Codex is analyzing your request...`,
++    `${operationName} - Processing and generating insights...`,
++    `${operationName} - Creating structured response for your review...`,
++    `${operationName} - Large analysis in progress (this is normal for big requests)...`,
++    `${operationName} - Still working... Codex takes time for quality results...`,
++  ];
++
++  let messageIndex = 0;
++  let progress = 0;
++
++  sendProgressNotification(extra, 0, undefined, `Starting ${operationName}`);
++
++  const progressInterval = setInterval(async () => {
++    if (isProcessing) {
++      progress += 1;
++      const baseMessage = progressMessages[messageIndex % progressMessages.length];
++      const outputPreview = latestOutput.slice(-150).trim();
++      const message = outputPreview ? `${baseMessage}\nOutput: ...${outputPreview}` : baseMessage;
++
++      await sendProgressNotification(extra, progress, undefined, message);
++      messageIndex++;
++    } else {
++      clearInterval(progressInterval);
++    }
++  }, PROTOCOL.KEEPALIVE_INTERVAL);
++
++  return { interval: progressInterval };
++}
++
++function stopProgressUpdates(progressData: { interval: NodeJS.Timeout }, extra: ToolExtra, success: boolean = true) {
++  const operationName = currentOperationName;
++  isProcessing = false;
++  currentOperationName = "";
++  clearInterval(progressData.interval);
++
++  sendProgressNotification(
++    extra,
++    100,
++    100,
++    success ? `${operationName} completed successfully` : `${operationName} failed`,
++  );
++}
++
++for (const tool of toolRegistry) {
++  const shape = (tool.zodSchema as z.ZodObject<z.ZodRawShape>).shape;
++
++  server.registerTool(
++    tool.name,
++    { description: tool.description, inputSchema: shape, annotations: tool.annotations },
++    async (args: Record<string, unknown>, extra: ToolExtra): Promise<CallToolResult> => {
++      const toolName = tool.name;
++      const progressData = startProgressUpdates(toolName, extra);
++
++      try {
++        const toolArgs = args as unknown as BaseToolArguments;
++        Logger.toolInvocation(toolName, args);
++
++        const result = await executeTool(toolName, toolArgs, (newOutput) => {
++          latestOutput = newOutput;
++        });
++
++        stopProgressUpdates(progressData, extra, true);
++
++        return {
++          content: [{ type: "text", text: result }],
++          isError: false,
++        };
++      } catch (error) {
++        stopProgressUpdates(progressData, extra, false);
++        Logger.error(`Error in tool '${toolName}':`, error);
++
++        const errorMessage = error instanceof Error ? error.message : String(error);
++
++        return {
++          content: [{ type: "text", text: `Error executing ${toolName}: ${errorMessage}` }],
++          isError: true,
++        };
++      }
++    },
++  );
++}
++
++for (const tool of toolRegistry) {
++  if (!tool.prompt) continue;
++
++  server.registerPrompt(tool.name, { description: tool.prompt.description }, async (args: Record<string, string>) => {
++    const promptMessage = getPromptMessage(tool.name, args);
++    return {
++      messages: [
++        {
++          role: "user" as const,
++          content: { type: "text" as const, text: promptMessage },
++        },
++      ],
++    };
++  });
++}
++
++export function createSandboxServer(): McpServer {
++  const sandbox = new McpServer({ name, version });
++
++  for (const tool of toolRegistry) {
++    const shape = (tool.zodSchema as z.ZodObject<z.ZodRawShape>).shape;
++    sandbox.registerTool(tool.name, { description: tool.description, inputSchema: shape }, async () => ({
++      content: [{ type: "text" as const, text: "Sandbox mode" }],
++      isError: false,
++    }));
++  }
++
++  for (const tool of toolRegistry) {
++    if (!tool.prompt) continue;
++    sandbox.registerPrompt(tool.name, { description: tool.prompt.description }, async () => ({
++      messages: [{ role: "user" as const, content: { type: "text" as const, text: "Sandbox" } }],
++    }));
++  }
++
++  return sandbox;
++}
++
++export async function startServer() {
++  Logger.debug("init ask-codex-mcp");
++  const transport = new StdioServerTransport();
++  await server.connect(transport);
++  Logger.debug("ask-codex-mcp listening on stdio");
++}
+diff --git a/packages/codex-mcp/src/tools/ask-codex.tool.ts b/packages/codex-mcp/src/tools/ask-codex.tool.ts
+new file mode 100644
+index 0000000..397b665
+--- /dev/null
++++ b/packages/codex-mcp/src/tools/ask-codex.tool.ts
+@@ -0,0 +1,48 @@
++import type { UnifiedTool } from "@ask-llm/shared";
++import { z } from "zod";
++import { ERROR_MESSAGES, STATUS_MESSAGES } from "../constants.js";
++import { executeCodexCLI } from "../utils/codexExecutor.js";
++
++const askCodexArgsSchema = z.object({
++  prompt: z.string().min(1).describe("The question, code review request, or analysis task to send to Codex CLI"),
++  model: z
++    .string()
++    .optional()
++    .describe(
++      "DO NOT set this parameter. The tool automatically uses gpt-5.4 (latest) and falls back to gpt-5.4-mini on quota errors. Only set this if the user explicitly requests a specific model.",
++    ),
++});
++
++export const askCodexTool: UnifiedTool = {
++  name: "ask-codex",
++  description:
++    "Send a prompt to OpenAI Codex CLI (defaults to gpt-5.4 with automatic fallback on quota errors). Use for code review, second opinions, analysis, and AI-to-AI collaboration. Do not override the model parameter unless the user explicitly asks.",
++  zodSchema: askCodexArgsSchema,
++  annotations: {
++    title: "Ask Codex",
++    readOnlyHint: false,
++    destructiveHint: false,
++    idempotentHint: false,
++    openWorldHint: true,
++  },
++  prompt: {
++    description: "Execute Codex CLI to get OpenAI Codex's response for code review and analysis.",
++  },
++  category: "codex",
++  execute: async (args, onProgress) => {
++    const { prompt, model } = args;
++    if (!prompt?.trim()) {
++      throw new Error(ERROR_MESSAGES.NO_PROMPT_PROVIDED);
++    }
++
++    const result = await executeCodexCLI({
++      prompt: prompt as string,
++      model: model as string | undefined,
++      onProgress,
++    });
++
++    const threadLine = result.threadId ? `\n\n[Thread ID: ${result.threadId}]` : "";
++
++    return `${STATUS_MESSAGES.CODEX_RESPONSE}\n${result.response}${threadLine}`;
++  },
++};
+diff --git a/packages/codex-mcp/src/tools/index.ts b/packages/codex-mcp/src/tools/index.ts
+new file mode 100644
+index 0000000..425cf8c
+--- /dev/null
++++ b/packages/codex-mcp/src/tools/index.ts
+@@ -0,0 +1,7 @@
++import { toolRegistry } from "@ask-llm/shared";
++import { askCodexTool } from "./ask-codex.tool.js";
++import { pingTool } from "./simple-tools.js";
++
++toolRegistry.push(askCodexTool, pingTool);
++
++export { executeTool, getPromptMessage, toolRegistry } from "@ask-llm/shared";
+diff --git a/packages/codex-mcp/src/tools/simple-tools.ts b/packages/codex-mcp/src/tools/simple-tools.ts
+new file mode 100644
+index 0000000..f2f9f6d
+--- /dev/null
++++ b/packages/codex-mcp/src/tools/simple-tools.ts
+@@ -0,0 +1,27 @@
++import type { UnifiedTool } from "@ask-llm/shared";
++import { executeCommand } from "@ask-llm/shared";
++import { z } from "zod";
++
++const pingArgsSchema = z.object({
++  message: z.string().optional().describe("A message to echo back to test the connection"),
++});
++
++export const pingTool: UnifiedTool = {
++  name: "ping",
++  description: "Test connectivity with the MCP server",
++  zodSchema: pingArgsSchema,
++  annotations: {
++    title: "Ping",
++    readOnlyHint: true,
++    idempotentHint: true,
++    openWorldHint: false,
++  },
++  prompt: {
++    description: "Echo test message to verify MCP server is working",
++  },
++  category: "simple",
++  execute: async (args, onProgress) => {
++    const message = args.message || "Pong from Codex MCP Server!";
++    return executeCommand("echo", [message as string], onProgress);
++  },
++};
+diff --git a/packages/codex-mcp/src/utils/__tests__/codexExecutor.test.ts b/packages/codex-mcp/src/utils/__tests__/codexExecutor.test.ts
+new file mode 100644
+index 0000000..5d6cfc4
+--- /dev/null
++++ b/packages/codex-mcp/src/utils/__tests__/codexExecutor.test.ts
+@@ -0,0 +1,228 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import { CLI, MODELS } from "../../constants.js";
++
++vi.mock("@ask-llm/shared", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("@ask-llm/shared")>();
++  return {
++    ...actual,
++    executeCommand: vi.fn(),
++    Logger: {
++      warn: vi.fn(),
++      debug: vi.fn(),
++      error: vi.fn(),
++    },
++  };
++});
++
++import { executeCommand } from "@ask-llm/shared";
++import { executeCodexCLI } from "../codexExecutor.js";
++
++const mockExecuteCommand = vi.mocked(executeCommand);
++
++beforeEach(() => {
++  vi.clearAllMocks();
++  mockExecuteCommand.mockResolvedValue("Codex response");
++});
++
++describe("executeCodexCLI argument construction", () => {
++  it("uses 'exec' subcommand with correct flags", async () => {
++    await executeCodexCLI({ prompt: "explain this code" });
++
++    expect(mockExecuteCommand).toHaveBeenCalledOnce();
++    const [cmd, args] = mockExecuteCommand.mock.calls[0];
++    expect(cmd).toBe(CLI.COMMANDS.CODEX);
++    expect(args[0]).toBe(CLI.COMMANDS.EXEC);
++  });
++
++  it("builds args with required flags and prompt as last positional", async () => {
++    await executeCodexCLI({ prompt: "hello" });
++
++    const [, args] = mockExecuteCommand.mock.calls[0];
++    expect(args).toEqual([
++      CLI.COMMANDS.EXEC,
++      CLI.FLAGS.SKIP_GIT,
++      CLI.FLAGS.EPHEMERAL,
++      CLI.FLAGS.JSON,
++      CLI.FLAGS.MODEL,
++      MODELS.DEFAULT,
++      "hello",
++    ]);
++  });
++
++  it("uses custom model when specified", async () => {
++    await executeCodexCLI({ prompt: "hello", model: "o3" });
++
++    const [, args] = mockExecuteCommand.mock.calls[0];
++    expect(args).toContain("o3");
++    expect(args).not.toContain(MODELS.DEFAULT);
++  });
++
++  it("passes onProgress callback to executeCommand", async () => {
++    const onProgress = vi.fn();
++    await executeCodexCLI({ prompt: "hello", onProgress });
++
++    expect(mockExecuteCommand).toHaveBeenCalledWith(CLI.COMMANDS.CODEX, expect.any(Array), onProgress);
++  });
++});
++
++describe("JSONL output parsing", () => {
++  it("extracts agent_message text from item.completed event", async () => {
++    mockExecuteCommand.mockResolvedValue(
++      [
++        '{"type":"thread.started","thread_id":"abc-123"}',
++        '{"type":"turn.started"}',
++        '{"type":"item.completed","item":{"type":"agent_message","text":"The code looks good."}}',
++        '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":50}}',
++      ].join("\n"),
++    );
++
++    const result = await executeCodexCLI({ prompt: "review this" });
++    expect(result.response).toContain("The code looks good.");
++    expect(result.threadId).toBe("abc-123");
++  });
++
++  it("selects the LAST agent_message when multiple present", async () => {
++    mockExecuteCommand.mockResolvedValue(
++      [
++        '{"type":"item.completed","item":{"type":"agent_message","text":"First message"}}',
++        '{"type":"item.completed","item":{"type":"agent_message","text":"Final answer"}}',
++      ].join("\n"),
++    );
++
++    const result = await executeCodexCLI({ prompt: "review this" });
++    expect(result.response).toContain("Final answer");
++    expect(result.response).not.toContain("First message");
++  });
++
++  it("skips non-agent_message item types", async () => {
++    mockExecuteCommand.mockResolvedValue(
++      [
++        '{"type":"item.completed","item":{"type":"command_execution","command":"ls"}}',
++        '{"type":"item.completed","item":{"type":"agent_message","text":"Here are the files."}}',
++      ].join("\n"),
++    );
++
++    const result = await executeCodexCLI({ prompt: "list files" });
++    expect(result.response).toContain("Here are the files.");
++  });
++
++  it("skips malformed JSON lines gracefully", async () => {
++    mockExecuteCommand.mockResolvedValue(
++      ["not json at all", '{"type":"item.completed","item":{"type":"agent_message","text":"Valid response"}}'].join(
++        "\n",
++      ),
++    );
++
++    const result = await executeCodexCLI({ prompt: "test" });
++    expect(result.response).toContain("Valid response");
++  });
++
++  it("falls back to raw text when no agent_message found", async () => {
++    mockExecuteCommand.mockResolvedValue("Plain text output with no JSON");
++
++    const result = await executeCodexCLI({ prompt: "test" });
++    expect(result.response).toBe("Plain text output with no JSON");
++  });
++
++  it("includes token stats from turn.completed in response", async () => {
++    mockExecuteCommand.mockResolvedValue(
++      [
++        '{"type":"item.completed","item":{"type":"agent_message","text":"Analysis complete."}}',
++        '{"type":"turn.completed","usage":{"input_tokens":5000,"output_tokens":200,"cached_input_tokens":4500}}',
++      ].join("\n"),
++    );
++
++    const result = await executeCodexCLI({ prompt: "analyze" });
++    expect(result.response).toContain("5,000 input tokens");
++    expect(result.response).toContain("200 output tokens");
++    expect(result.response).toContain("4,500 cached");
++  });
++
++  it("extracts thread_id from thread.started event", async () => {
++    mockExecuteCommand.mockResolvedValue(
++      [
++        '{"type":"thread.started","thread_id":"thread-uuid-456"}',
++        '{"type":"item.completed","item":{"type":"agent_message","text":"Done."}}',
++      ].join("\n"),
++    );
++
++    const result = await executeCodexCLI({ prompt: "test" });
++    expect(result.threadId).toBe("thread-uuid-456");
++  });
++
++  it("throws on error events when no agent_message present", async () => {
++    mockExecuteCommand.mockResolvedValue('{"type":"error","message":"Something went wrong"}');
++
++    await expect(executeCodexCLI({ prompt: "test" })).rejects.toThrow("Codex error event");
++  });
++
++  it("returns agent_message even when error event is also present", async () => {
++    mockExecuteCommand.mockResolvedValue(
++      [
++        '{"type":"item.completed","item":{"type":"agent_message","text":"Partial answer before error"}}',
++        '{"type":"error","message":"Non-fatal tool error"}',
++      ].join("\n"),
++    );
++
++    const result = await executeCodexCLI({ prompt: "test" });
++    expect(result.response).toContain("Partial answer before error");
++  });
++});
++
++describe("quota fallback", () => {
++  it("retries with fallback model on rate_limit_exceeded error", async () => {
++    mockExecuteCommand
++      .mockRejectedValueOnce(new Error("rate_limit_exceeded"))
++      .mockResolvedValueOnce('{"type":"item.completed","item":{"type":"agent_message","text":"Fallback response"}}');
++
++    const result = await executeCodexCLI({ prompt: "test" });
++    expect(result.response).toContain("Fallback response");
++    expect(mockExecuteCommand).toHaveBeenCalledTimes(2);
++
++    const [, fallbackArgs] = mockExecuteCommand.mock.calls[1];
++    expect(fallbackArgs).toContain(MODELS.FALLBACK);
++  });
++
++  it("retries with fallback model on 429 error", async () => {
++    mockExecuteCommand
++      .mockRejectedValueOnce(new Error("HTTP 429 Too Many Requests"))
++      .mockResolvedValueOnce('{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}');
++
++    const result = await executeCodexCLI({ prompt: "test" });
++    expect(result.response).toContain("OK");
++    expect(mockExecuteCommand).toHaveBeenCalledTimes(2);
++  });
++
++  it("retries with fallback model on insufficient_quota error", async () => {
++    mockExecuteCommand
++      .mockRejectedValueOnce(new Error("insufficient_quota"))
++      .mockResolvedValueOnce('{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}');
++
++    const result = await executeCodexCLI({ prompt: "test" });
++    expect(result.response).toContain("OK");
++  });
++
++  it("does not retry if already using fallback model", async () => {
++    mockExecuteCommand.mockRejectedValueOnce(new Error("rate_limit_exceeded"));
++
++    await expect(executeCodexCLI({ prompt: "test", model: MODELS.FALLBACK })).rejects.toThrow("rate_limit_exceeded");
++    expect(mockExecuteCommand).toHaveBeenCalledTimes(1);
++  });
++
++  it("throws combined error when both models fail", async () => {
++    mockExecuteCommand
++      .mockRejectedValueOnce(new Error("rate_limit_exceeded"))
++      .mockRejectedValueOnce(new Error("still failing"));
++
++    await expect(executeCodexCLI({ prompt: "test" })).rejects.toThrow(
++      `${MODELS.DEFAULT} quota exceeded, ${MODELS.FALLBACK} fallback also failed: still failing`,
++    );
++  });
++
++  it("re-throws non-quota errors without retry", async () => {
++    mockExecuteCommand.mockRejectedValueOnce(new Error("ENOENT: codex not found"));
++
++    await expect(executeCodexCLI({ prompt: "test" })).rejects.toThrow("ENOENT: codex not found");
++    expect(mockExecuteCommand).toHaveBeenCalledTimes(1);
++  });
++});
+diff --git a/packages/codex-mcp/src/utils/codexExecutor.ts b/packages/codex-mcp/src/utils/codexExecutor.ts
+new file mode 100644
+index 0000000..ab4b055
+--- /dev/null
++++ b/packages/codex-mcp/src/utils/codexExecutor.ts
+@@ -0,0 +1,136 @@
++import { executeCommand, Logger } from "@ask-llm/shared";
++import { CLI, ERROR_MESSAGES, MODELS, STATUS_MESSAGES } from "../constants.js";
++
++interface CodexItemCompleted {
++  type: "item.completed";
++  item?: {
++    type?: string;
++    text?: string;
++  };
++}
++
++interface CodexTurnCompleted {
++  type: "turn.completed";
++  usage?: {
++    input_tokens?: number;
++    cached_input_tokens?: number;
++    output_tokens?: number;
++  };
++}
++
++interface CodexThreadStarted {
++  type: "thread.started";
++  thread_id?: string;
++}
++
++type CodexJsonLine = CodexItemCompleted | CodexTurnCompleted | CodexThreadStarted | { type: string };
++
++export interface CodexExecutorOptions {
++  prompt: string;
++  model?: string;
++  onProgress?: (newOutput: string) => void;
++}
++
++export interface CodexExecutorResult {
++  response: string;
++  threadId: string | undefined;
++}
++
++function formatStats(usage: CodexTurnCompleted["usage"]): string {
++  if (!usage) return "";
++  const parts: string[] = [];
++  if (usage.input_tokens != null) parts.push(`${usage.input_tokens.toLocaleString()} input tokens`);
++  if (usage.output_tokens != null) parts.push(`${usage.output_tokens.toLocaleString()} output tokens`);
++  if (usage.cached_input_tokens != null && usage.cached_input_tokens > 0)
++    parts.push(`${usage.cached_input_tokens.toLocaleString()} cached`);
++  return parts.length > 0 ? `\n\n[Codex stats: ${parts.join(", ")}]` : "";
++}
++
++function parseCodexJsonlOutput(raw: string): CodexExecutorResult {
++  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
++
++  let lastAgentMessage: string | undefined;
++  let threadId: string | undefined;
++  let usage: CodexTurnCompleted["usage"];
++  let lastError: string | undefined;
++
++  for (const line of lines) {
++    let parsed: CodexJsonLine;
++    try {
++      parsed = JSON.parse(line) as CodexJsonLine;
++    } catch {
++      continue;
++    }
++
++    if (parsed.type === "thread.started") {
++      const thread = parsed as CodexThreadStarted;
++      if (thread.thread_id) {
++        threadId = thread.thread_id;
++      }
++    }
++
++    if (parsed.type === "item.completed") {
++      const item = (parsed as CodexItemCompleted).item;
++      if (item?.type === "agent_message" && typeof item.text === "string" && item.text.length > 0) {
++        lastAgentMessage = item.text;
++      }
++    }
++
++    if (parsed.type === "turn.completed") {
++      usage = (parsed as CodexTurnCompleted).usage;
++    }
++
++    if (parsed.type === "error") {
++      lastError = JSON.stringify(parsed);
++    }
++  }
++
++  if (lastError && !lastAgentMessage) {
++    throw new Error(`Codex error event: ${lastError}`);
++  }
++
++  if (!lastAgentMessage) {
++    Logger.debug("No agent_message found in Codex JSONL output, using raw text");
++    return { response: raw, threadId };
++  }
++
++  return {
++    response: lastAgentMessage + formatStats(usage),
++    threadId,
++  };
++}
++
++function isQuotaError(error: unknown): boolean {
++  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
++  return ERROR_MESSAGES.QUOTA_SIGNALS.some((signal) => msg.includes(signal));
++}
++
++function buildArgs(prompt: string, model: string): string[] {
++  return [CLI.COMMANDS.EXEC, CLI.FLAGS.SKIP_GIT, CLI.FLAGS.EPHEMERAL, CLI.FLAGS.JSON, CLI.FLAGS.MODEL, model, prompt];
++}
++
++export async function executeCodexCLI(options: CodexExecutorOptions): Promise<CodexExecutorResult> {
++  const model = options.model || MODELS.DEFAULT;
++  const args = buildArgs(options.prompt, model);
++
++  try {
++    const raw = await executeCommand(CLI.COMMANDS.CODEX, args, options.onProgress);
++    return parseCodexJsonlOutput(raw);
++  } catch (error) {
++    if (isQuotaError(error) && model !== MODELS.FALLBACK) {
++      Logger.warn(`${STATUS_MESSAGES.QUOTA_SWITCHING} Falling back to ${MODELS.FALLBACK}.`);
++      Logger.debug(`Status: ${STATUS_MESSAGES.FALLBACK_RETRY}`);
++      const fallbackArgs = buildArgs(options.prompt, MODELS.FALLBACK);
++      try {
++        const raw = await executeCommand(CLI.COMMANDS.CODEX, fallbackArgs, options.onProgress);
++        Logger.warn(`Successfully executed with ${MODELS.FALLBACK} fallback.`);
++        Logger.debug(`Status: ${STATUS_MESSAGES.FALLBACK_SUCCESS}`);
++        return parseCodexJsonlOutput(raw);
++      } catch (fallbackError) {
++        const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
++        throw new Error(`${MODELS.DEFAULT} quota exceeded, ${MODELS.FALLBACK} fallback also failed: ${fallbackMsg}`);
++      }
++    }
++    throw error;
++  }
++}
+diff --git a/packages/codex-mcp/tsconfig.json b/packages/codex-mcp/tsconfig.json
+new file mode 100644
+index 0000000..c9a48c1
+--- /dev/null
++++ b/packages/codex-mcp/tsconfig.json
+@@ -0,0 +1,12 @@
++{
++  "extends": "../../tsconfig.base.json",
++  "compilerOptions": {
++    "outDir": "./dist",
++    "rootDir": "./src"
++  },
++  "include": ["src/**/*"],
++  "exclude": ["node_modules", "dist", "src/**/__tests__"],
++  "references": [
++    { "path": "../shared" }
++  ]
++}
