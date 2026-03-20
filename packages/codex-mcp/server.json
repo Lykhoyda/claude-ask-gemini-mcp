@@ -1,0 +1,22 @@
+{
+  "name": "ask-codex-mcp",
+  "description": "MCP server for OpenAI Codex CLI integration — ask Codex for code review, second opinions, and AI-to-AI collaboration",
+  "license": "MIT",
+  "repository": "https://github.com/Lykhoyda/ask-llm",
+  "package": {
+    "registry": "npm",
+    "name": "ask-codex-mcp",
+    "version": "0.1.0"
+  },
+  "tools": [
+    {
+      "name": "ask-codex",
+      "description": "Send a prompt to OpenAI Codex CLI for code review, analysis, or second opinions"
+    },
+    {
+      "name": "ping",
+      "description": "Test connectivity with the MCP server"
+    }
+  ],
+  "env": []
+}

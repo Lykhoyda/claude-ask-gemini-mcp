@@ -1,15 +1,15 @@
 {
-  "name": "ask-gemini-mcp",
-  "version": "1.4.5",
-  "mcpName": "io.github.Lykhoyda/ask-gemini",
-  "description": "MCP server for Gemini CLI integration - for Claude IDE and other IDEs",
+  "name": "ask-codex-mcp",
+  "version": "0.1.0",
+  "mcpName": "io.github.Lykhoyda/ask-codex",
+  "description": "MCP server for OpenAI Codex CLI integration - for Claude IDE and other IDEs",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
     ".": "./dist/index.js",
     "./executor": {
-      "types": "./dist/utils/geminiExecutor.d.ts",
-      "default": "./dist/utils/geminiExecutor.js"
+      "types": "./dist/utils/codexExecutor.d.ts",
+      "default": "./dist/utils/codexExecutor.js"
     },
     "./register": "./dist/tools/index.js"
   },
@@ -26,9 +26,9 @@
     "mcp",
     "mcp-server",
     "modelcontextprotocol",
-    "gemini",
-    "gemini-cli",
-    "google-gemini",
+    "codex",
+    "openai",
+    "openai-codex",
     "claude",
     "ai",
     "ai-collaboration",
@@ -41,7 +41,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Lykhoyda/ask-llm.git",
-    "directory": "packages/gemini-mcp"
+    "directory": "packages/codex-mcp"
   },
   "bugs": {
     "url": "https://github.com/Lykhoyda/ask-llm/issues"
