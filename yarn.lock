@@ -219,9 +219,11 @@ __metadata:
     "@ask-llm/shared": "workspace:*"
     "@biomejs/biome": "npm:^2.4.4"
     "@types/node": "npm:^22.19.13"
+    ask-codex-mcp: "workspace:*"
     ask-gemini-mcp: "workspace:*"
     typescript: "npm:^5.0.0"
   bin:
+    ask-codex-run: dist/codex-run.js
     ask-gemini-run: dist/run.js
   languageName: unknown
   linkType: soft

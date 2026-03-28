@@ -14,7 +14,7 @@
 
 ## Priority 8: Multi-LLM Support (ask-llm-mcp) — ADR-020, ADR-026
 - [x] **Phase 1: Monorepo restructure** — yarn workspaces, packages/shared + packages/gemini-mcp + packages/plugin (ADR-026)
-- [ ] **Phase 2: Plugin providers** — Gemini, Codex, Ollama providers in packages/plugin
+- [x] **Phase 2: Plugin providers** — Gemini + Codex in packages/claude-plugin: ask-codex-run binary, codex-reviewer agent, /codex-review skill (ADR-031)
 - [x] **Phase 3: Codex MCP** — packages/codex-mcp/ (`ask-codex-mcp`), codexExecutor with JSONL parsing, gpt-5.4 default with gpt-5.4-mini fallback on quota errors (ADR-028)
 - [x] **Phase 4: Orchestrator** — packages/llm-mcp/ (`ask-llm-mcp`), dynamic provider import via `./register` subpath, `isCommandAvailable()` gating, tool dedup, startup logging (ADR-029)
 - [ ] **Phase 5: Ollama (v2)** — packages/ask-ollama/, HTTP executor, Docker integration tests

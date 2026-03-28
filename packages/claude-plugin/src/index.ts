@@ -1,4 +1,26 @@
 export interface ProviderExecutor {
   name: string;
+  command: string;
   execute(prompt: string, options?: Record<string, unknown>): Promise<string>;
 }
+
+export const providers: ProviderExecutor[] = [
+  {
+    name: "gemini",
+    command: "gemini",
+    async execute(prompt: string) {
+      const { executeGeminiCLI } = await import("ask-gemini-mcp/executor");
+      const result = await executeGeminiCLI({ prompt });
+      return result.response;
+    },
+  },
+  {
+    name: "codex",
+    command: "codex",
+    async execute(prompt: string) {
+      const { executeCodexCLI } = await import("ask-codex-mcp/executor");
+      const result = await executeCodexCLI({ prompt });
+      return result.response;
+    },
+  },
+];

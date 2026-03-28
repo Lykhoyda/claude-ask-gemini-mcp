@@ -4,10 +4,22 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"],
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ],
   "references": [
-    { "path": "../shared" },
-    { "path": "../gemini-mcp" }
+    {
+      "path": "../shared"
+    },
+    {
+      "path": "../gemini-mcp"
+    },
+    {
+      "path": "../codex-mcp"
+    }
   ]
 }

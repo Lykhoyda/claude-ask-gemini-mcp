@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-031: Claude Code Plugin — Codex Provider Support
+- **Date:** 2026-03-28
+- **Status:** Accepted
+- **Context:** The Claude Code plugin (packages/claude-plugin) only supported Gemini. Phase 2 of the multi-LLM roadmap adds Codex as a second provider, mirroring the Gemini pattern.
+- **Decision:** (1) Added ask-codex-run CLI binary (src/codex-run.ts) — calls executeCodexCLI directly, supports stdin piping, mirrors ask-gemini-run. (2) Added codex-reviewer subagent (agents/codex-reviewer.md) — isolated Codex review in separate context, same prompt template and output format as gemini-reviewer. (3) Added /codex-review skill (skills/codex-review/SKILL.md) — delegates to codex-reviewer agent. (4) Updated ProviderExecutor interface with command field and populated providers array with both Gemini and Codex entries using dynamic executor imports. (5) Added ask-codex-mcp as workspace dependency, added tsconfig reference to ../codex-mcp.
+- **Consequences:** Claude Code users can now get second opinions from either Gemini or Codex. Hooks remain Gemini-only (the established workflow — users can customize). Ollama provider deferred to Phase 5.
+
 ## ADR-030: Multi-Approach Benchmark (MCP vs Skill vs Subagent vs Orchestrator)
 - **Date:** 2026-03-20
 - **Status:** In Progress (static analysis complete, manual runs pending)

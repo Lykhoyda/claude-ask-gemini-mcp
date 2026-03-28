@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
+    "ask-codex-run": "dist/codex-run.js",
     "ask-gemini-run": "dist/run.js"
   },
   "scripts": {
@@ -14,6 +15,7 @@
   },
   "dependencies": {
     "@ask-llm/shared": "workspace:*",
+    "ask-codex-mcp": "workspace:*",
     "ask-gemini-mcp": "workspace:*"
   },
   "engines": {
