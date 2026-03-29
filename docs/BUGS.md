@@ -51,11 +51,11 @@
 
 ## Shared Layer — Known Technical Debt
 
-### commandExecutor.ts contains Gemini-specific quota detection
+### ~~commandExecutor.ts contains Gemini-specific quota detection~~ FIXED
 - **Severity:** Low
-- **File:** `packages/shared/src/commandExecutor.ts`, lines 58–78
-- **Description:** The shared `executeCommand` function checks stderr for `RESOURCE_EXHAUSTED` and logs Gemini-specific error JSON. This is dead code for the Codex provider (Codex uses `rate_limit_exceeded` / `429` in error messages, not gRPC status codes). Harmless but violates the "provider-agnostic shared code" principle.
-- **Deferred fix:** Refactor `executeCommand` to accept an optional provider-specific stderr handler callback. Requires its own ADR and test updates across both provider packages.
+- **File:** `packages/shared/src/commandExecutor.ts`
+- **Description:** The shared `executeCommand` function had Gemini-specific `RESOURCE_EXHAUSTED` detection hardcoded in the stderr handler.
+- **Fix:** Added optional `onStderr` callback parameter to `executeCommand`. Moved Gemini quota detection into `geminiExecutor.ts` as the callback. The shared layer is now provider-agnostic.
 
 ## Claude Code Plugin — Known Limitations (from Gemini & Codex review)
 

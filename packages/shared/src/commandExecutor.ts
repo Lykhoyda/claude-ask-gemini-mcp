@@ -19,6 +19,7 @@ export async function executeCommand(
   command: string,
   args: string[],
   onProgress?: (newOutput: string) => void,
+  onStderr?: (stderr: string) => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const commandId = Logger.commandExecution(command, args);
@@ -55,25 +56,8 @@ export async function executeCommand(
 
     childProcess.stderr.on("data", (data: Buffer) => {
       stderr += data.toString();
-      if (stderr.includes("RESOURCE_EXHAUSTED")) {
-        const modelMatch = stderr.match(/Quota exceeded for quota metric '([^']+)'/);
-        const statusMatch = stderr.match(/status["\s]*[:=]\s*(\d+)/);
-        const reasonMatch = stderr.match(/"reason":\s*"([^"]+)"/);
-        const model = modelMatch ? modelMatch[1] : "Unknown Model";
-        const status = statusMatch ? statusMatch[1] : "429";
-        const reason = reasonMatch ? reasonMatch[1] : "rateLimitExceeded";
-        const errorJson = {
-          error: {
-            code: parseInt(status, 10),
-            message: `GMCPT: --> Quota exceeded for ${model}`,
-            details: {
-              model: model,
-              reason: reason,
-              statusText: "Too Many Requests -- > try using gemini-3-flash-preview by asking",
-            },
-          },
-        };
-        Logger.error(`Gemini Quota Error: ${JSON.stringify(errorJson, null, 2)}`);
+      if (onStderr) {
+        onStderr(stderr);
       }
     });
 

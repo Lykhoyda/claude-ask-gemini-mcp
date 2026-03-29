@@ -189,6 +189,25 @@ function buildArgs(
   return args;
 }
 
+function handleGeminiStderr(stderr: string): void {
+  if (stderr.includes("RESOURCE_EXHAUSTED")) {
+    const modelMatch = stderr.match(/Quota exceeded for quota metric '([^']+)'/);
+    const statusMatch = stderr.match(/status["\s]*[:=]\s*(\d+)/);
+    const reasonMatch = stderr.match(/"reason":\s*"([^"]+)"/);
+    const model = modelMatch ? modelMatch[1] : "Unknown Model";
+    const status = statusMatch ? statusMatch[1] : "429";
+    const reason = reasonMatch ? reasonMatch[1] : "rateLimitExceeded";
+    const errorJson = {
+      error: {
+        code: parseInt(status, 10),
+        message: `GMCPT: --> Quota exceeded for ${model}`,
+        details: { model, reason, statusText: "Too Many Requests" },
+      },
+    };
+    Logger.error(`Gemini Quota Error: ${JSON.stringify(errorJson, null, 2)}`);
+  }
+}
+
 export async function executeGeminiCLI(options: GeminiExecutorOptions): Promise<GeminiExecutorResult> {
   const { model, sandbox, changeMode, sessionId, includeDirs, onProgress } = options;
   let prompt_processed = options.prompt;
@@ -262,7 +281,7 @@ ${prompt_processed}
   const args = buildArgs(prompt_processed, model || MODELS.PRO, sandbox, sessionId, includeDirs);
 
   try {
-    const raw = await executeCommand(CLI.COMMANDS.GEMINI, args, onProgress);
+    const raw = await executeCommand(CLI.COMMANDS.GEMINI, args, onProgress, handleGeminiStderr);
     return parseGeminiJsonOutput(raw);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
