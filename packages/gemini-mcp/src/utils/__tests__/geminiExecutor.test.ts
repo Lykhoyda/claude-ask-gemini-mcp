@@ -14,13 +14,14 @@ vi.mock("@ask-llm/shared", async (importOriginal) => {
   };
 });
 
-import { executeCommand } from "@ask-llm/shared";
+import { executeCommand, responseCache } from "@ask-llm/shared";
 import { executeGeminiCLI } from "../geminiExecutor.js";
 
 const mockExecuteCommand = vi.mocked(executeCommand);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  responseCache.clear();
   mockExecuteCommand.mockResolvedValue("Gemini response");
 });
 

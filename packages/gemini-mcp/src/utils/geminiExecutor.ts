@@ -8,6 +8,8 @@ import {
   getChunks,
   Logger,
   parseChangeModeOutput,
+  ResponseCache,
+  responseCache,
   summarizeChangeModeEdits,
   validateChangeModeEdits,
 } from "@ask-llm/shared";
@@ -280,9 +282,24 @@ ${prompt_processed}
 
   const args = buildArgs(prompt_processed, model || MODELS.PRO, sandbox, sessionId, includeDirs);
 
+  const isCacheable = !sessionId && !sandbox && !changeMode;
+  const cacheKey = isCacheable ? ResponseCache.buildKey("gemini", options.prompt, model) : null;
+
+  if (cacheKey) {
+    const cached = responseCache.get(cacheKey);
+    if (cached) {
+      Logger.debug("Response cache hit for gemini");
+      return { response: cached, sessionId: undefined };
+    }
+  }
+
   try {
     const raw = await executeCommand(CLI.COMMANDS.GEMINI, args, onProgress, handleGeminiStderr);
-    return parseGeminiJsonOutput(raw);
+    const result = parseGeminiJsonOutput(raw);
+    if (cacheKey) {
+      responseCache.set(cacheKey, result.response);
+    }
+    return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     if (errorMessage.includes(ERROR_MESSAGES.QUOTA_EXCEEDED) && model !== MODELS.FLASH) {

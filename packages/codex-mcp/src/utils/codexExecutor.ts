@@ -1,4 +1,4 @@
-import { executeCommand, Logger } from "@ask-llm/shared";
+import { executeCommand, Logger, ResponseCache, responseCache } from "@ask-llm/shared";
 import { CLI, ERROR_MESSAGES, MODELS, STATUS_MESSAGES } from "../constants.js";
 
 interface CodexItemCompleted {
@@ -111,11 +111,21 @@ function buildArgs(prompt: string, model: string): string[] {
 
 export async function executeCodexCLI(options: CodexExecutorOptions): Promise<CodexExecutorResult> {
   const model = options.model || MODELS.DEFAULT;
+  const cacheKey = ResponseCache.buildKey("codex", options.prompt, model);
+
+  const cached = responseCache.get(cacheKey);
+  if (cached) {
+    Logger.debug("Response cache hit for codex");
+    return { response: cached, threadId: undefined };
+  }
+
   const args = buildArgs(options.prompt, model);
 
   try {
     const raw = await executeCommand(CLI.COMMANDS.CODEX, args, options.onProgress);
-    return parseCodexJsonlOutput(raw);
+    const result = parseCodexJsonlOutput(raw);
+    responseCache.set(cacheKey, result.response);
+    return result;
   } catch (error) {
     if (isQuotaError(error) && model !== MODELS.FALLBACK) {
       Logger.warn(`${STATUS_MESSAGES.QUOTA_SWITCHING} Falling back to ${MODELS.FALLBACK}.`);
@@ -125,7 +135,9 @@ export async function executeCodexCLI(options: CodexExecutorOptions): Promise<Co
         const raw = await executeCommand(CLI.COMMANDS.CODEX, fallbackArgs, options.onProgress);
         Logger.warn(`Successfully executed with ${MODELS.FALLBACK} fallback.`);
         Logger.debug(`Status: ${STATUS_MESSAGES.FALLBACK_SUCCESS}`);
-        return parseCodexJsonlOutput(raw);
+        const fallbackResult = parseCodexJsonlOutput(raw);
+        responseCache.set(cacheKey, fallbackResult.response);
+        return fallbackResult;
       } catch (fallbackError) {
         const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
         throw new Error(`${MODELS.DEFAULT} quota exceeded, ${MODELS.FALLBACK} fallback also failed: ${fallbackMsg}`);

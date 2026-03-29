@@ -13,3 +13,5 @@ export { EXECUTION, LOG_LEVEL_ENV_VAR, LOG_PREFIX, PROTOCOL } from "./constants.
 export { Logger } from "./logger.js";
 export type { UnifiedTool } from "./registry.js";
 export { executeTool, getPromptMessage, toolRegistry } from "./registry.js";
+export type { ResponseCacheOptions } from "./responseCache.js";
+export { ResponseCache, responseCache } from "./responseCache.js";

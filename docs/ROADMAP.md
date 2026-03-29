@@ -4,7 +4,7 @@
 - See [design doc](plans/2026-02-25-claude-code-plugin-design.md)
 
 ## Priority 4: Features from Community PRs
-- [ ] LRU response caching with performance optimizations (upstream PR #44)
+- [x] LRU response caching — in-memory LRU with 30min TTL, 10MB max, provider+prompt+model key (upstream PR #44)
 - [ ] Gemini API compatibility mode (upstream PR #35)
 
 ## Priority 7: Distribution & Discovery
