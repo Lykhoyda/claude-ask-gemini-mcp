@@ -1,5 +1,13 @@
 # Architectural Decisions
 
+## ADR-032: Ollama MCP Package (ask-ollama-mcp)
+- **Date:** 2026-03-30
+- **Status:** Accepted (implements ADR-020 Phase 5)
+- **Context:** ADR-020 approved multi-LLM provider packages. Phase 5 adds a local Ollama LLM provider, completing the trifecta of cloud CLI (Gemini), cloud CLI (Codex), and local HTTP (Ollama). Ollama runs models like qwen2.5-coder locally — no API keys needed.
+- **Decision:** (1) HTTP executor using native `fetch` against `POST /api/chat` with `stream: false` — Ollama's `ollama run` CLI starts an interactive REPL unsuitable for programmatic use, so we bypass `executeCommand` entirely. (2) Default model `qwen2.5-coder:7b` with `qwen2.5-coder:1.5b` fallback on model-not-found errors (NOT quota errors — Ollama is local with no rate limits). (3) Base URL via `OLLAMA_HOST` env var (Ollama's own convention), defaulting to `http://localhost:11434`. (4) Availability detection via `GET /api/tags` HTTP probe with 2s timeout — unlike Gemini/Codex which use `which` to check CLI presence, Ollama requires the server to be running. (5) Extended `ProviderConfig` in `llm-mcp/constants.ts` with optional `availabilityModule` and `availabilityFn` fields for HTTP-based provider detection. (6) Tool annotations: `openWorldHint: false` (all computation is local, no external network calls). (7) Ping tool lists locally available models via `/api/tags`. (8) Added `"ollama"` to `UnifiedTool.category` union. (9) Claude plugin integration: ollama-run binary, ollama-reviewer agent, /ollama-review skill.
+- **Trade-offs:** No streaming support (stream: false simplifies implementation; local inference is fast enough). No changeMode or sessions (local models don't benefit from these patterns designed for expensive remote APIs). Model-not-found signals use broad "not found" matching since Ollama's error format includes the model name between "model" and "not found".
+- **Consequences:** 26 tests (executor + smoke), orchestrator updated to 3 providers. Users with Ollama installed get a free, private, offline AI review option alongside cloud providers. The `availabilityModule` pattern is extensible to future HTTP-based providers (LM Studio, vLLM).
+
 ## ADR-031: Claude Code Plugin — Codex Provider Support
 - **Date:** 2026-03-28
 - **Status:** Accepted

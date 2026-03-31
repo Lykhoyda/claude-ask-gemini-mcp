@@ -17,7 +17,7 @@
 - [x] **Phase 2: Plugin providers** — Gemini + Codex in packages/claude-plugin: ask-codex-run binary, codex-reviewer agent, /codex-review skill (ADR-031)
 - [x] **Phase 3: Codex MCP** — packages/codex-mcp/ (`ask-codex-mcp`), codexExecutor with JSONL parsing, gpt-5.4 default with gpt-5.4-mini fallback on quota errors (ADR-028)
 - [x] **Phase 4: Orchestrator** — packages/llm-mcp/ (`ask-llm-mcp`), dynamic provider import via `./register` subpath, `isCommandAvailable()` gating, tool dedup, startup logging (ADR-029)
-- [ ] **Phase 5: Ollama (v2)** — packages/ask-ollama/, HTTP executor, Docker integration tests
+- [x] **Phase 5: Ollama** — packages/ollama-mcp/ (`ask-ollama-mcp`), HTTP executor via native fetch against POST /api/chat, qwen2.5-coder:7b default with 1.5b fallback, OLLAMA_HOST env var, /api/tags availability probe (ADR-032)
 - [ ] **Cloud smoke tests** — nightly CI with API keys as secrets, one real call per provider
 - [x] **Benchmark** — token overhead + latency comparison of MCP vs Skill vs Subagent vs Orchestrator (ADR-030, static analysis complete, manual runs pending)
 - See [design doc](plans/2026-02-26-ask-llm-mcp-design.md)

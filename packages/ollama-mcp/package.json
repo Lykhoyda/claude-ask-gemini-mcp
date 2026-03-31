@@ -1,0 +1,75 @@
+{
+  "name": "ask-ollama-mcp",
+  "version": "0.1.0",
+  "mcpName": "io.github.Lykhoyda/ask-ollama",
+  "description": "MCP server for local Ollama LLM integration - for Claude IDE and other IDEs",
+  "type": "module",
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./executor": {
+      "types": "./dist/utils/ollamaExecutor.d.ts",
+      "default": "./dist/utils/ollamaExecutor.js"
+    },
+    "./register": "./dist/tools/index.js"
+  },
+  "bin": "dist/cli.js",
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/cli.js",
+    "dev": "tsc -b && node dist/cli.js",
+    "test": "vitest run",
+    "lint": "biome check src/ && tsc --noEmit",
+    "prepack": "mkdir -p node_modules/@ask-llm/shared && cp -r ../../packages/shared/dist node_modules/@ask-llm/shared/ && cp ../../packages/shared/package.json node_modules/@ask-llm/shared/"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "modelcontextprotocol",
+    "ollama",
+    "local-llm",
+    "offline",
+    "claude",
+    "ai",
+    "ai-collaboration",
+    "llm",
+    "code-review",
+    "second-opinion"
+  ],
+  "author": "Lykhoyda",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lykhoyda/ask-llm.git",
+    "directory": "packages/ollama-mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/Lykhoyda/ask-llm/issues"
+  },
+  "homepage": "https://github.com/Lykhoyda/ask-llm#readme",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@ask-llm/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@types/node": "^22.19.13",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bundledDependencies": [
+    "@ask-llm/shared"
+  ]
+}

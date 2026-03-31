@@ -23,4 +23,13 @@ export const providers: ProviderExecutor[] = [
       return result.response;
     },
   },
+  {
+    name: "ollama",
+    command: "ollama",
+    async execute(prompt: string) {
+      const { executeOllamaCLI } = await import("ask-ollama-mcp/executor");
+      const result = await executeOllamaCLI({ prompt });
+      return result.response;
+    },
+  },
 ];

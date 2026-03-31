@@ -33,11 +33,20 @@ export async function detectProviders(): Promise<ProviderStatus> {
   const missing: string[] = [];
 
   const checks = await Promise.all(
-    Object.entries(PROVIDERS).map(async ([key, provider]) => ({
-      key,
-      provider,
-      found: await isCommandAvailable(provider.command),
-    })),
+    Object.entries(PROVIDERS).map(async ([key, provider]) => {
+      let found: boolean;
+      if (provider.availabilityModule && provider.availabilityFn) {
+        try {
+          const mod = await import(provider.availabilityModule);
+          found = await (mod[provider.availabilityFn] as () => Promise<boolean>)();
+        } catch {
+          found = false;
+        }
+      } else {
+        found = await isCommandAvailable(provider.command);
+      }
+      return { key, provider, found };
+    }),
   );
 
   for (const { key, provider, found } of checks) {
@@ -160,7 +169,7 @@ export async function startServer() {
     "ask-llm",
     {
       description:
-        "Send a prompt to an LLM provider (Gemini, Codex). Specify which provider to use. Each provider auto-selects its best model with fallback on quota errors.",
+        "Send a prompt to an LLM provider (Gemini, Codex, Ollama). Specify which provider to use. Each provider auto-selects its best model with fallback on errors.",
       inputSchema: askLlmSchema.shape,
       annotations: { title: "Ask LLM", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },

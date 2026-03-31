@@ -20,6 +20,9 @@
     },
     {
       "path": "../codex-mcp"
+    },
+    {
+      "path": "../ollama-mcp"
     }
   ]
 }

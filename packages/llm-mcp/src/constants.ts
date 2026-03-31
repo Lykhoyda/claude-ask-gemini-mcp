@@ -4,6 +4,8 @@ export interface ProviderConfig {
   executorModule: string;
   executorFn: string;
   defaultModel: string;
+  availabilityModule?: string;
+  availabilityFn?: string;
 }
 
 export const PROVIDERS: Record<string, ProviderConfig> = {
@@ -21,9 +23,19 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     executorFn: "executeCodexCLI",
     defaultModel: "gpt-5.4",
   },
+  ollama: {
+    name: "Ollama",
+    command: "ollama",
+    executorModule: "ask-ollama-mcp/executor",
+    executorFn: "executeOllamaCLI",
+    defaultModel: "qwen2.5-coder:7b",
+    availabilityModule: "ask-ollama-mcp/executor",
+    availabilityFn: "isProviderAvailable",
+  },
 };
 
 export const INSTALL_HINTS: Record<string, string> = {
   gemini: "npm install -g @google/gemini-cli",
   codex: "npm install -g @openai/codex",
+  ollama: "https://ollama.com — then: ollama pull qwen2.5-coder:7b",
 };

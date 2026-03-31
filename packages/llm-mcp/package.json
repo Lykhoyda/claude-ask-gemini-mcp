@@ -2,7 +2,7 @@
   "name": "ask-llm-mcp",
   "version": "0.1.0",
   "mcpName": "io.github.Lykhoyda/ask-llm",
-  "description": "Unified MCP server for multi-LLM consultation — registers tools from all available providers (Gemini, Codex) behind runtime CLI availability checks",
+  "description": "Unified MCP server for multi-LLM consultation — registers tools from all available providers (Gemini, Codex, Ollama) behind runtime availability checks",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -15,7 +15,7 @@
     "dev": "tsc -b && node dist/cli.js",
     "test": "vitest run",
     "lint": "biome check src/ && tsc --noEmit",
-    "prepack": "mkdir -p node_modules/@ask-llm/shared && cp -r ../../packages/shared/dist node_modules/@ask-llm/shared/ && cp ../../packages/shared/package.json node_modules/@ask-llm/shared/ && mkdir -p node_modules/ask-gemini-mcp && cp -r ../../packages/gemini-mcp/dist node_modules/ask-gemini-mcp/ && cp ../../packages/gemini-mcp/package.json node_modules/ask-gemini-mcp/ && mkdir -p node_modules/ask-codex-mcp && cp -r ../../packages/codex-mcp/dist node_modules/ask-codex-mcp/ && cp ../../packages/codex-mcp/package.json node_modules/ask-codex-mcp/"
+    "prepack": "mkdir -p node_modules/@ask-llm/shared && cp -r ../../packages/shared/dist node_modules/@ask-llm/shared/ && cp ../../packages/shared/package.json node_modules/@ask-llm/shared/ && mkdir -p node_modules/ask-gemini-mcp && cp -r ../../packages/gemini-mcp/dist node_modules/ask-gemini-mcp/ && cp ../../packages/gemini-mcp/package.json node_modules/ask-gemini-mcp/ && mkdir -p node_modules/ask-codex-mcp && cp -r ../../packages/codex-mcp/dist node_modules/ask-codex-mcp/ && cp ../../packages/codex-mcp/package.json node_modules/ask-codex-mcp/ && mkdir -p node_modules/ask-ollama-mcp && cp -r ../../packages/ollama-mcp/dist node_modules/ask-ollama-mcp/ && cp ../../packages/ollama-mcp/package.json node_modules/ask-ollama-mcp/"
   },
   "keywords": [
     "mcp",
@@ -27,6 +27,8 @@
     "codex",
     "openai",
     "google-gemini",
+    "ollama",
+    "local-llm",
     "claude",
     "ai",
     "ai-collaboration",
@@ -57,6 +59,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "ask-codex-mcp": "workspace:*",
     "ask-gemini-mcp": "workspace:*",
+    "ask-ollama-mcp": "workspace:*",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -71,6 +74,7 @@
   "bundledDependencies": [
     "@ask-llm/shared",
     "ask-gemini-mcp",
-    "ask-codex-mcp"
+    "ask-codex-mcp",
+    "ask-ollama-mcp"
   ]
 }

@@ -5,6 +5,7 @@
     { "path": "packages/gemini-mcp" },
     { "path": "packages/claude-plugin" },
     { "path": "packages/codex-mcp" },
+    { "path": "packages/ollama-mcp" },
     { "path": "packages/llm-mcp" }
   ]
 }
