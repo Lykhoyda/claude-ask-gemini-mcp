@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { toolRegistry } from "../tools/index.js";
 
 describe("MCP server smoke test", () => {
-  const expectedTools = ["ask-gemini", "fetch-chunk", "ping"];
+  const expectedTools = ["ask-gemini", "ask-gemini-edit", "fetch-chunk", "ping"];
 
-  it("has exactly 3 tools registered", () => {
+  it("has exactly 4 tools registered", () => {
     const toolNames = toolRegistry.map((t) => t.name);
     expect(toolNames).toEqual(expect.arrayContaining(expectedTools));
     expect(toolNames).toHaveLength(expectedTools.length);

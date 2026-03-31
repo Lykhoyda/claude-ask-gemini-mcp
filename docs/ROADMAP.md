@@ -5,7 +5,7 @@
 
 ## Priority 4: Features from Community PRs
 - [x] LRU response caching — in-memory LRU with 30min TTL, 10MB max, provider+prompt+model key (upstream PR #44)
-- [ ] Gemini API compatibility mode (upstream PR #35)
+- [x] Gemini API compatibility mode (upstream PR #35) — simplified `ask-gemini` to 2 params (prompt + model), moved changeMode to dedicated `ask-gemini-edit` tool (ADR-034)
 
 ## Priority 7: Distribution & Discovery
 - [ ] Add OpenGraph metadata and badges to README for better link previews

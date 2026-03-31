@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-034: Gemini API Simplification (upstream PR #35)
+- **Date:** 2026-03-31
+- **Status:** Accepted
+- **Context:** The `ask-gemini` tool exposed 8 parameters (prompt, model, sandbox, changeMode, sessionId, includeDirs, chunkIndex, chunkCacheKey). Most MCP clients only use `prompt`. The complex schema wasted tokens and increased hallucination risk (LLMs filling in parameters they shouldn't). Upstream PR #35 proposed a "compatibility mode" with simplified schemas.
+- **Decision:** (1) Simplified `ask-gemini` to 2 parameters: `prompt` + `model` — matching the Codex and Ollama tool patterns. (2) Created `ask-gemini-edit` tool for structured code edits: `prompt` + `model` + `includeDirs`, with changeMode always enabled. (3) Removed `sandbox` and `sessionId` from tool schemas — sandbox is a niche feature, sessionId is returned in responses for manual use. (4) `chunkIndex`/`chunkCacheKey` remain exclusively in `fetch-chunk` where they belong (they were duplicated in the old ask-gemini schema). (5) The executor (`executeGeminiCLI`) retains full functionality — only the MCP-facing schema changed.
+- **Consequences:** Primary tool drops from 8 params to 2 (significant token savings). Zero functionality lost — changeMode has its own dedicated tool, advanced executor options are still available programmatically. The Gemini MCP now exposes 4 tools: ask-gemini, ask-gemini-edit, fetch-chunk, ping.
+
 ## ADR-033: Cloud Smoke Tests
 - **Date:** 2026-03-31
 - **Status:** Accepted
