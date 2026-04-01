@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-035: Brainstorm Skill and Confidence-Based Review Agents
+- **Date:** 2026-04-01
+- **Status:** Accepted
+- **Context:** The plugin had basic review agents (gemini-reviewer, codex-reviewer, ollama-reviewer) with simple prompt templates and no quality filtering. Users needed a way to consult multiple providers simultaneously for planning and design decisions. Anthropic's feature-dev plugin demonstrated a well-structured confidence-based code-reviewer and phased workflow approach.
+- **Decision:** (1) Created `/brainstorm` skill + `brainstorm-coordinator` agent that sends a topic to multiple providers in parallel and synthesizes consensus points, unique insights, contradictions, and recommendations. Default providers: gemini,codex (avoids unnecessary Ollama calls). (2) Created `/brainstorm-all` shortcut that includes all providers including Ollama. (3) Upgraded all 3 review agents with confidence-based filtering (≥80 threshold) inspired by feature-dev's code-reviewer: 3-phase workflow (context gathering → prompt construction → synthesis), project-aware (reads CLAUDE.md conventions), output grouped by Critical (≥90) vs Important (80-89). (4) Provider list is configurable via skill arguments.
+- **Consequences:** Users can now `/brainstorm` for multi-LLM consultation and get higher-quality reviews with confidence scores. The brainstorm workflow is a consultation pattern (not implementation) — complementary to feature-dev's implementation workflow.
+
 ## ADR-034: Gemini API Simplification (upstream PR #35)
 - **Date:** 2026-03-31
 - **Status:** Accepted
