@@ -1,5 +1,5 @@
 ---
-name: review
+name: multi-review
 description: This skill should be used when the user asks to "review my code with multiple providers", "get reviews from Gemini and Codex", "multi-provider review", "review changes", or wants independent code reviews from both Gemini and Codex in parallel.
 user_invocable: true
 ---
