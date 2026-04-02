@@ -31,29 +31,21 @@ jobs:
         run: npm publish --access public
         working-directory: packages/gemini-mcp
         continue-on-error: true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish ask-codex-mcp
         run: npm publish --access public
         working-directory: packages/codex-mcp
         continue-on-error: true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish ask-ollama-mcp
         run: npm publish --access public
         working-directory: packages/ollama-mcp
         continue-on-error: true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish ask-llm-mcp
         run: npm publish --access public
         working-directory: packages/llm-mcp
         continue-on-error: true
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Official MCP Registry — OIDC, no token needed
       - name: Install mcp-publisher
