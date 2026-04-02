@@ -57,6 +57,26 @@
 - **Description:** The shared `executeCommand` function had Gemini-specific `RESOURCE_EXHAUSTED` detection hardcoded in the stderr handler.
 - **Fix:** Added optional `onStderr` callback parameter to `executeCommand`. Moved Gemini quota detection into `geminiExecutor.ts` as the callback. The shared layer is now provider-agnostic.
 
+## Bugs Found via Multi-Provider Review (/multi-review — Gemini + Codex)
+
+### ~~ProgressHandle.stop() race condition~~ FIXED
+- **Severity:** Critical (Gemini: 95, Codex: 90 — consensus)
+- **Files:** `packages/{gemini,codex,ollama}-mcp/src/index.ts`, `packages/llm-mcp/src/index.ts`
+- **Description:** `stop()` called `sendProgressNotification()` without awaiting the returned Promise. The MCP tool result was dispatched before the "100% completed" progress notification was sent, causing clients to show stale progress state.
+- **Fix:** Made `stop()` async, updated `ProgressHandle` interface to `Promise<void>`, added `await handle.stop()` in all tool handlers. Then extracted into `@ask-llm/shared/progressTracker.ts`.
+
+### ~~Hook temp file leak on signal interruption~~ FIXED
+- **Severity:** Critical (Gemini: 90, Codex: 90 — consensus)
+- **File:** `packages/claude-plugin/hooks/hooks.json`
+- **Description:** Both hooks (Stop, PreToolUse) created temp files with `mktemp` but relied on a trailing `rm -f` for cleanup. If the `gemini` CLI was killed, interrupted, or the hook runner terminated early, the `rm` was never reached and temp files with diff content leaked in `/tmp/`.
+- **Fix:** Added `trap 'rm -f "$tmp"' EXIT HUP INT TERM` immediately after `mktemp`.
+
+### ~~Concurrent tool calls corrupt shared progress state~~ FIXED
+- **Severity:** Critical
+- **Files:** `packages/{gemini,codex,ollama}-mcp/src/index.ts`
+- **Description:** Module-level mutable state (`isProcessing`, `currentOperationName`, `latestOutput`) was shared across all tool invocations. Two simultaneous MCP tool calls would interleave writes, corrupting progress messages.
+- **Fix:** Replaced with `ProgressHandle` closure pattern — each tool invocation gets its own closure-scoped state. Then extracted to `@ask-llm/shared`.
+
 ## Claude Code Plugin — Known Limitations (from Gemini & Codex review)
 
 ### Untracked files not included in Stop hook review

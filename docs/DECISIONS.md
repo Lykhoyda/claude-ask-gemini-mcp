@@ -1,5 +1,19 @@
 # Architectural Decisions
 
+## ADR-041: Extract ProgressHandle into @ask-llm/shared
+- **Date:** 2026-04-02
+- **Status:** Accepted
+- **Context:** All four MCP server `index.ts` files contained near-identical progress tracking code: `ProgressHandle` interface, `sendProgressNotification`, `startProgressUpdates`/`createProgressTracker`. After normalizing provider names, only the progress message strings differed (~55 lines duplicated per server, ~220 lines total).
+- **Decision:** Extracted `ProgressHandle`, `sendProgressNotification`, and `createProgressTracker` into `packages/shared/src/progressTracker.ts`. Each server now provides only a `PROGRESS_MESSAGES` factory function with provider-specific strings. The tool registration loop was NOT extracted — it's tightly coupled to each server's `toolRegistry` import and the orchestrator (`llm-mcp`) has a completely different registration pattern.
+- **Consequences:** Net reduction of 180 lines. Each server's `index.ts` dropped from ~180 to ~115 lines. `@ask-llm/shared` already depended on `@modelcontextprotocol/sdk`, so no new dependencies were introduced.
+
+## ADR-040: Async ProgressHandle.stop() and Hook Temp File Cleanup
+- **Date:** 2026-04-02
+- **Status:** Accepted
+- **Context:** Multi-provider code review (`/multi-review` — Gemini + Codex in parallel) identified two consensus issues: (1) `ProgressHandle.stop()` called `sendProgressNotification()` without awaiting it, causing a race where the MCP tool result was sent before the "100% completed" progress notification. (2) Hook temp files (`mktemp /tmp/ask-llm-XXXXXX`) were only cleaned up on the happy path — signal interruptions leaked files.
+- **Decision:** (1) Made `stop()` async, updated `ProgressHandle` interface to `stop: (success: boolean) => Promise<void>`, and added `await handle.stop()` in all 4 server tool handlers. (2) Added `trap 'rm -f "$tmp"' EXIT HUP INT TERM` to both hooks immediately after `mktemp`.
+- **Consequences:** Final progress notification is guaranteed to be sent before the tool result. Temp files are cleaned up on any exit path including SIGINT/SIGTERM/SIGHUP.
+
 ## ADR-039: MCP Server Concurrency Fix and Package Cleanup
 - **Date:** 2026-04-02
 - **Status:** Accepted

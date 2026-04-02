@@ -35,8 +35,23 @@
 
 ## Undecided / Potential Improvements
 - **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Would replace keepalive messages with live content streaming. High complexity, no user demand yet.
+- **Extract tool registration loop** — the for-of loop registering tools/prompts from `toolRegistry` is identical across gemini/codex/ollama servers. Could be a shared `registerTools(server, registry)` helper, but llm-mcp has a different pattern so the dedup gain is modest.
 
 ## Completed
+
+### Plugin Marketplace & Refinement (ADR-038/039/040/041)
+- [x] **Marketplace distribution** — `.claude-plugin/marketplace.json` at repo root, `git-subdir` source, `/plugin marketplace add Lykhoyda/ask-llm` (ADR-038)
+- [x] **Plugin rename** — `ask-gemini` → `ask-llm`, multi-provider description and keywords
+- [x] **Agent colors** — cyan (Gemini), green (Codex), yellow (Ollama), magenta (brainstorm)
+- [x] **Hooks → gemini CLI** — replaced `node dist/run.js` with `gemini -p @tempfile`, no build dependency
+- [x] **Hook temp file cleanup** — `trap 'rm -f "$tmp"' EXIT HUP INT TERM` (ADR-040)
+- [x] **MCP server names** — shortened from `gemini-cli`/`codex-cli` to `gemini`/`codex`, then moved to user-scope to avoid `plugin:` prefix
+- [x] **/multi-review skill** — parallel Gemini + Codex code review with consensus highlighting
+- [x] **Concurrency fix** — module-level progress state → `ProgressHandle` closure pattern in all 4 servers (ADR-039)
+- [x] **Async stop()** — `ProgressHandle.stop()` now awaits final progress notification (ADR-040)
+- [x] **Shared progress tracker** — extracted `createProgressTracker` into `@ask-llm/shared`, −180 lines (ADR-041)
+- [x] **Package cleanup** — `bin` object form, `prompt_processed` → `promptProcessed`, ollama-mcp tsconfig ref
+- [x] **Version bump** — all packages bumped to next minor (gemini 1.5.0, others 0.2.0)
 
 ### Priority 1: Critical Fixes (all resolved)
 - [x] Fix deprecated `-p` flag for Gemini CLI v0.23+ (upstream PRs #56, #43)
