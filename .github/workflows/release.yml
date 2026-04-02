@@ -70,19 +70,19 @@ jobs:
       - run: ./mcp-publisher login github-oidc
 
       - name: Publish ask-gemini to MCP Registry
-        run: ./mcp-publisher publish
+        run: ./mcp-publisher publish server.json
         continue-on-error: true
 
       - name: Publish ask-codex to MCP Registry
-        run: ./mcp-publisher publish --server-json packages/codex-mcp/server.json
+        run: ./mcp-publisher publish packages/codex-mcp/server.json
         continue-on-error: true
 
       - name: Publish ask-ollama to MCP Registry
-        run: ./mcp-publisher publish --server-json packages/ollama-mcp/server.json
+        run: ./mcp-publisher publish packages/ollama-mcp/server.json
         continue-on-error: true
 
       - name: Publish ask-llm to MCP Registry
-        run: ./mcp-publisher publish --server-json packages/llm-mcp/server.json
+        run: ./mcp-publisher publish packages/llm-mcp/server.json
         continue-on-error: true
 
       # GitHub Release with auto-generated changelog
