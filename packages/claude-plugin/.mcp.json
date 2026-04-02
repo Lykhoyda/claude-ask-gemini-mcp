@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "gemini-cli": {
+    "gemini": {
       "command": "npx",
       "args": ["-y", "ask-gemini-mcp"]
     },
-    "codex-cli": {
+    "codex": {
       "command": "npx",
       "args": ["-y", "ask-codex-mcp"]
     },
