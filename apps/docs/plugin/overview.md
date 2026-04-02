@@ -40,6 +40,7 @@ This gives you `gemini:ask-gemini` rather than `plugin:ask-llm:gemini:ask-gemini
 
 | Command | Provider | Description |
 |---------|----------|-------------|
+| `/multi-review` | Gemini + Codex | Parallel review with 4-phase validation pipeline and consensus highlighting |
 | `/gemini-review` | Gemini | Get a second opinion on your current changes |
 | `/codex-review` | Codex | Get a second opinion from GPT-5.4 |
 | `/ollama-review` | Ollama | Local review — no data leaves your machine |

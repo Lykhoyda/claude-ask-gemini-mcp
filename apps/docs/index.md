@@ -24,8 +24,8 @@ hero:
 <div class="provider-grid">
   <a href="/ask-llm/plugin/overview" class="provider-card plugin-featured" data-provider="plugin">
     <span class="provider-name">Ask LLM Plugin</span>
-    <span class="provider-desc">Multi-provider code review, brainstorming, and automated hooks for Claude Code. Parallel Gemini + Codex reviews with 4-phase validation pipeline and consensus highlighting. Install with two commands.</span>
-    <span class="provider-pkg">/plugin marketplace add Lykhoyda/ask-llm</span>
+    <span class="provider-desc">Multi-provider code review, brainstorming, and automated hooks for Claude Code. Parallel Gemini + Codex reviews with 4-phase validation pipeline and consensus highlighting.</span>
+    <span class="provider-pkg">/plugin marketplace add Lykhoyda/ask-llm && /plugin install ask-llm@ask-llm-plugins</span>
   </a>
 </div>
 
