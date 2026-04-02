@@ -558,6 +558,23 @@
   box-shadow: inset 0 20px 40px -20px var(--color-unified-glow);
 }
 
+.provider-card[data-provider="plugin"]:hover::after {
+  background: var(--color-plugin);
+}
+.provider-card[data-provider="plugin"]:hover::before {
+  box-shadow: inset 0 20px 40px -20px var(--color-plugin-glow);
+}
+
+.provider-card.plugin-featured {
+  grid-column: 1 / -1;
+}
+.provider-card.plugin-featured .provider-name {
+  color: var(--color-plugin);
+}
+.provider-card.plugin-featured .provider-pkg {
+  color: var(--color-text-secondary);
+}
+
 .provider-card .provider-icon {
   font-size: 1.5rem;
 }

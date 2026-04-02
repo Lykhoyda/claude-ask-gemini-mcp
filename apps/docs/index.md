@@ -4,22 +4,32 @@ layout: home
 hero:
   name: "Ask LLM"
   text: "AI-to-AI collaboration via MCP"
-  tagline: "Bridge Claude with Gemini, Codex, and Ollama. Get second opinions, debate plans, and review code across AI providers."
+  tagline: "Bridge Claude with Gemini, Codex, and Ollama. Multi-provider code review, brainstorming, and automated hooks — as a Claude Code plugin or standalone MCP servers."
   actions:
     - theme: brand
-      text: Quick Start
+      text: Install Plugin
+      link: /plugin/overview
+    - theme: alt
+      text: Quick Start (MCP)
       link: /getting-started
     - theme: alt
-      text: View on GitHub
+      text: GitHub
       link: https://github.com/Lykhoyda/ask-llm
-    - theme: alt
-      text: npm packages
-      link: https://www.npmjs.com/search?q=ask-llm
 ---
 
 <div class="vp-doc home-content">
 
-<h2 class="section-title">Providers</h2>
+<h2 class="section-title">Claude Code Plugin</h2>
+
+<div class="provider-grid">
+  <a href="/ask-llm/plugin/overview" class="provider-card plugin-featured" data-provider="plugin">
+    <span class="provider-name">Ask LLM Plugin</span>
+    <span class="provider-desc">Multi-provider code review, brainstorming, and automated hooks for Claude Code. Parallel Gemini + Codex reviews with 4-phase validation pipeline and consensus highlighting. Install with two commands.</span>
+    <span class="provider-pkg">/plugin marketplace add Lykhoyda/ask-llm</span>
+  </a>
+</div>
+
+<h2 class="section-title">MCP Servers</h2>
 
 <div class="provider-grid">
   <a href="/ask-llm/providers/gemini" class="provider-card" data-provider="gemini">
