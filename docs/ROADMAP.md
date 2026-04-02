@@ -7,6 +7,17 @@
 - [x] LRU response caching — in-memory LRU with 30min TTL, 10MB max, provider+prompt+model key (upstream PR #44)
 - [x] Gemini API compatibility mode (upstream PR #35) — simplified `ask-gemini` to 2 params (prompt + model), moved changeMode to dedicated `ask-gemini-edit` tool (ADR-034)
 
+## Priority 6: Documentation Site Redesign (ADR-036)
+- [x] **Dark-only theme** — `appearance: 'force-dark'`, indigo accent (#818CF8), Geist Sans/Mono fonts
+- [x] **Design token system** — `design-tokens.css` with brand, surface, text, spacing tokens + VitePress remaps
+- [x] **Anti-grid card corners** — CSS `clip-path` with layered pseudo-element border technique
+- [x] **Component rebuilds** — SetupTabs, DiagramModal, TroubleshootingModal restyled with tokens
+- [x] **Multi-provider navigation** — Providers dropdown, sidebar section, 4 provider pages
+- [x] **Provider cards** — Per-provider accent colors with gradient-glow hover effects
+- [x] **Rebrand** — "Ask LLM" title, multi-provider hero, updated tagline
+- [ ] Convert config.js / theme/index.js to TypeScript
+- [ ] Add provider installation commands to SetupTabs per provider page
+
 ## Priority 7: Distribution & Discovery
 - [ ] Add OpenGraph metadata and badges to README for better link previews
 - [ ] Publish blog post / dev.to article about the tool and AI-to-AI collaboration pattern

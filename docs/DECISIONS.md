@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-036: Documentation Site Redesign (Dark-Only, Mastra-Inspired)
+- **Date:** 2026-04-01
+- **Status:** Accepted
+- **Context:** The docs site (apps/docs/) was branded as "Ask Gemini MCP" with a blue (#4f8af7) accent, light/dark mode, and Manrope/Bricolage Grotesque fonts. The project has expanded to 4 providers (Gemini, Codex, Ollama, Unified) and needed a rebrand plus a premium developer-tool aesthetic. User requested a mastra.ai-inspired redesign.
+- **Decision:** (1) Dark-only mode via `appearance: 'force-dark'` — removes the light mode toggle and all `html:not(.dark)` CSS (eliminated ~80 lines of dead code). (2) Indigo accent (#818CF8 primary, #6366F1 hover) replacing blue — chosen via Gemini consultation for "bridge/connector" semantics that is brand-neutral across providers. (3) Geist Mono as primary body font (`--vp-font-family-base`) with Geist Sans for headings — monospace-first aesthetic. (4) Design token system in `design-tokens.css` as single source of truth, with VitePress variable remapping. (5) Anti-grid chamfered corners via CSS `clip-path` polygon with layered `::before`/`::after` pseudo-elements (background + border layers) to solve the clip-path border clipping issue. (6) Per-provider accent colors (Gemini blue, Codex green, Ollama orange) with gradient-glow hover effects on provider cards. (7) Multi-provider navigation: Providers dropdown in nav, dedicated sidebar section, 4 new provider pages. (8) Rebranded to "Ask LLM" with multi-provider hero tagline.
+- **Consequences:** The site is now dark-only (no light mode support). All 3 Vue components were rebuilt with token-based styling. 4 new provider pages created. The clip-path corner pattern requires the 2-pseudo-element approach for any new card components.
+
 ## ADR-035: Brainstorm Skill and Confidence-Based Review Agents
 - **Date:** 2026-04-01
 - **Status:** Accepted

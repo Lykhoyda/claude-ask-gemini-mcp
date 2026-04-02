@@ -3,9 +3,12 @@ import { withMermaid } from "vitepress-plugin-mermaid";
 
 export default withMermaid(
   defineConfig({
-    title: "Ask Gemini MCP Documentation",
-    description: "Bridge Gemini models with Claude Desktop",
+    title: "Ask LLM",
+    description:
+      "MCP servers for AI-to-AI collaboration — Gemini, Codex, Ollama",
     base: "/ask-llm/",
+
+    appearance: "force-dark",
 
     vite: {
       build: {
@@ -13,10 +16,8 @@ export default withMermaid(
       },
     },
 
-    // Force dark mode by default
-    //appearance: 'dark',
-
     head: [
+      ["meta", { name: "theme-color", content: "#0a0a0b" }],
       ["link", { rel: "preconnect", href: "https://fonts.googleapis.com" }],
       [
         "link",
@@ -29,17 +30,28 @@ export default withMermaid(
       [
         "link",
         {
-          href: "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Manrope:wght@400;500;600;700;800&display=swap",
+          href: "https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap",
           rel: "stylesheet",
         },
       ],
     ],
 
     themeConfig: {
+      siteTitle: "Ask LLM",
 
       nav: [
         { text: "Home", link: "/" },
-        { text: "Open Guide", link: "/getting-started" },
+        { text: "Guide", link: "/getting-started" },
+        {
+          text: "Providers",
+          items: [
+            { text: "Gemini", link: "/providers/gemini" },
+            { text: "Codex", link: "/providers/codex" },
+            { text: "Ollama", link: "/providers/ollama" },
+            { text: "Unified", link: "/providers/unified" },
+          ],
+        },
+        { text: "Claude Plugin", link: "/plugin/overview" },
       ],
 
       sidebar: [
@@ -49,6 +61,26 @@ export default withMermaid(
           items: [
             { text: "Overview", link: "/" },
             { text: "Quick Start", link: "/getting-started" },
+          ],
+        },
+        {
+          text: "Providers",
+          collapsed: false,
+          items: [
+            { text: "Gemini", link: "/providers/gemini" },
+            { text: "Codex", link: "/providers/codex" },
+            { text: "Ollama", link: "/providers/ollama" },
+            { text: "Unified (ask-llm)", link: "/providers/unified" },
+          ],
+        },
+        {
+          text: "Claude Plugin",
+          collapsed: false,
+          items: [
+            { text: "Overview", link: "/plugin/overview" },
+            { text: "Skills", link: "/plugin/skills" },
+            { text: "Hooks", link: "/plugin/hooks" },
+            { text: "Agents", link: "/plugin/agents" },
           ],
         },
         {
@@ -64,7 +96,7 @@ export default withMermaid(
           text: "User Guide",
           collapsed: false,
           items: [
-            { text: "How to Ask Gemini", link: "/usage/how-to-ask" },
+            { text: "How to Ask", link: "/usage/how-to-ask" },
             {
               text: "Multi-Turn Sessions",
               link: "/usage/multi-turn-sessions",

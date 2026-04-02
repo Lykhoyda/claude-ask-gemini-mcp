@@ -1,7 +1,6 @@
 <template>
   <div class="diagram-wrapper">
-    <!-- Always visible diagram -->
-    <div class="diagram-container" @click="openModal" :style="containerStyle">
+    <div class="diagram-container" @click="openModal">
       <div class="diagram-preview">
         <slot />
       </div>
@@ -23,7 +22,6 @@
       </div>
     </div>
 
-    <!-- Modal overlay -->
     <div v-if="isOpen" class="diagram-modal" @click="closeModal">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
@@ -35,7 +33,7 @@
                 title="Zoom out"
                 :disabled="scale <= 0.1"
               >
-                <span class="zoom-symbol">−</span>
+                <span class="zoom-symbol">&minus;</span>
               </button>
               <span class="zoom-info">{{ Math.round(scale * 100) }}%</span>
               <button
@@ -82,6 +80,7 @@
           @touchstart="startPan"
           @touchmove="handlePan"
           @touchend="endPan"
+          @mouseleave="endPan"
         >
           <div class="diagram-content">
             <div
@@ -112,20 +111,8 @@ const startY = ref(0);
 const zoomContainer = ref(null);
 
 const maxZoom = computed(() => {
-  return Math.max(5, fitScale.value * 5); // At least 5x, or 5x the fit scale
+  return Math.max(5, fitScale.value * 5);
 });
-
-const containerStyle = computed(() => ({
-  cursor: "pointer",
-  border: "1px solid #ddd",
-  borderRadius: "8px",
-  padding: "10px",
-  margin: "10px 0",
-  transition: "all 0.2s ease",
-  ":hover": {
-    borderColor: "#999",
-  },
-}));
 
 const contentStyle = computed(() => ({
   transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value})`,
@@ -136,7 +123,6 @@ const contentStyle = computed(() => ({
 const openModal = () => {
   isOpen.value = true;
   document.body.style.overflow = "hidden";
-  // Start by fitting to screen
   setTimeout(() => {
     calculateFitScale();
     fitToScreen();
@@ -146,7 +132,6 @@ const openModal = () => {
 const closeModal = () => {
   isOpen.value = false;
   document.body.style.overflow = "";
-  // Reset zoom and pan for next time
   scale.value = 1;
   translateX.value = 0;
   translateY.value = 0;
@@ -163,13 +148,9 @@ const zoomOut = () => {
 const fitToScreen = () => {
   const container = zoomContainer.value;
   if (!container) return;
-
-  // Only calculate fit scale once per modal session
   if (fitScale.value === 1) {
     calculateFitScale();
   }
-
-  // Always use the stored fit scale
   scale.value = fitScale.value;
   translateX.value = 0;
   translateY.value = 0;
@@ -181,8 +162,6 @@ const calculateFitScale = () => {
 
   try {
     const containerRect = container.getBoundingClientRect();
-
-    // Try multiple selectors to find the diagram
     const selectors = [
       "svg",
       ".mermaid",
@@ -199,7 +178,6 @@ const calculateFitScale = () => {
       diagramElement = container.querySelector(selector);
       if (diagramElement) {
         diagramRect = diagramElement.getBoundingClientRect();
-        // Make sure we found a valid element with dimensions
         if (diagramRect.width > 0 && diagramRect.height > 0) {
           break;
         }
@@ -212,7 +190,6 @@ const calculateFitScale = () => {
       diagramRect.width === 0 ||
       diagramRect.height === 0
     ) {
-      // Final fallback: use the container content
       const content = container.querySelector(".diagram-content");
       if (content) {
         diagramRect = content.getBoundingClientRect();
@@ -220,23 +197,16 @@ const calculateFitScale = () => {
     }
 
     if (!diagramRect || diagramRect.width === 0 || diagramRect.height === 0) {
-      // Ultimate fallback
       fitScale.value = 1.2;
       return;
     }
 
-    // Calculate scale to fit with padding
     const padding = 40;
     const availableWidth = containerRect.width - padding;
     const availableHeight = containerRect.height - padding;
-
     const scaleX = availableWidth / diagramRect.width;
     const scaleY = availableHeight / diagramRect.height;
-
-    // Use the smaller scale to ensure it fits both dimensions
     const optimalScale = Math.min(scaleX, scaleY);
-
-    // Apply reasonable bounds
     fitScale.value = Math.max(0.3, Math.min(optimalScale, 4));
   } catch (error) {
     console.warn("Error calculating fit scale:", error);
@@ -295,17 +265,16 @@ onUnmounted(() => {
 .diagram-container {
   position: relative;
   cursor: pointer;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  border: 1px solid var(--color-bg-border);
+  border-radius: var(--radius-md);
   padding: 10px;
   margin: 10px 0;
-  transition: all 0.2s ease;
-  background: var(--vp-c-bg);
+  transition: border-color 0.15s ease;
+  background: var(--color-bg-raised);
 }
 
 .diagram-container:hover {
-  border-color: #999;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-color: var(--color-brand);
 }
 
 .diagram-container:hover .zoom-hint {
@@ -337,17 +306,19 @@ onUnmounted(() => {
   position: absolute;
   top: 10px;
   right: 10px;
-  background: rgba(0, 0, 0, 0.7);
-  color: white;
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
   padding: 6px 10px;
   border-radius: 20px;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   align-items: center;
   gap: 5px;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.15s ease;
   pointer-events: none;
   display: none;
+  border: 1px solid var(--color-bg-border);
 }
 
 @media (hover: hover) {
@@ -362,18 +333,18 @@ onUnmounted(() => {
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.9);
+  background: rgba(0, 0, 0, 0.85);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 9999;
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(8px);
 }
 
 .modal-content {
   position: relative;
-  background: var(--vp-c-bg);
-  border-radius: 12px;
+  background: var(--color-bg-raised);
+  border: 1px solid var(--color-bg-border);
   width: 95vw;
   height: 95vh;
   max-width: 1200px;
@@ -382,12 +353,20 @@ onUnmounted(() => {
   box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
+  clip-path: polygon(
+    var(--corner-size-lg) 0%,
+    100% 0%,
+    100% calc(100% - var(--corner-size-lg)),
+    calc(100% - var(--corner-size-lg)) 100%,
+    0% 100%,
+    0% var(--corner-size-lg)
+  );
 }
 
 .modal-header {
   padding: 15px 20px;
-  border-bottom: 1px solid var(--vp-c-border);
-  background: var(--vp-c-bg-alt);
+  border-bottom: 1px solid var(--color-bg-border);
+  background: var(--color-bg-hover);
   flex-shrink: 0;
 }
 
@@ -412,25 +391,26 @@ onUnmounted(() => {
 }
 
 .control-btn {
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-border);
-  border-radius: 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-bg-border);
+  border-radius: var(--radius-sm);
   padding: 8px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
-  color: var(--vp-c-text-1);
+  transition: all 0.15s ease;
+  color: var(--color-text-primary);
 }
 
 .control-btn:hover:not(:disabled) {
-  background: var(--vp-c-bg-soft);
-  border-color: var(--vp-c-brand);
+  background: var(--color-bg-hover);
+  border-color: var(--color-brand);
+  color: var(--color-brand);
 }
 
 .control-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
@@ -438,11 +418,13 @@ onUnmounted(() => {
   font-size: 18px;
   font-weight: bold;
   line-height: 1;
+  font-family: var(--font-mono);
 }
 
 .zoom-info {
-  font-size: 14px;
-  color: var(--vp-c-text-2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text-secondary);
   font-weight: 500;
   min-width: 50px;
   text-align: center;
@@ -453,19 +435,19 @@ onUnmounted(() => {
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: var(--vp-c-text-2);
+  color: var(--color-text-muted);
   width: 32px;
   height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .close-btn:hover {
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-1);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
 .diagram-zoom-container {
@@ -473,37 +455,26 @@ onUnmounted(() => {
   overflow: hidden;
   cursor: grab;
   position: relative;
-  background: var(--vp-c-bg);
+  background: var(--color-bg);
   background-image: radial-gradient(
     circle,
-    var(--vp-c-border) 1px,
+    var(--color-brand-glow-faint) 1px,
     transparent 1px
   );
   background-size: 20px 20px;
-  background-position: 0 0;
 }
 
 .diagram-zoom-container:active {
   cursor: grabbing;
 }
 
-.diagram-content {
-  width: 100%;
-  height: 100%;
-  user-select: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Mobile optimizations */
 @media (max-width: 768px) {
   .modal-content {
     width: 100vw;
     height: 100vh;
     max-width: none;
     max-height: none;
-    border-radius: 0;
+    clip-path: none;
   }
 
   .modal-header {
@@ -516,36 +487,12 @@ onUnmounted(() => {
     gap: 10px;
   }
 
-  .zoom-controls {
-    order: 1;
-  }
-
-  .action-controls {
-    order: 2;
-  }
-
-  .zoom-hint {
-    top: 5px;
-    right: 5px;
-    padding: 4px 8px;
-    font-size: 11px;
-  }
-
   .zoom-hint span {
     display: none;
   }
 }
 
 @media (max-width: 480px) {
-  .modal-controls {
-    gap: 8px;
-  }
-
-  .zoom-controls,
-  .action-controls {
-    gap: 8px;
-  }
-
   .control-btn {
     padding: 10px;
     min-width: 44px;

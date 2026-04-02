@@ -2,57 +2,82 @@
 layout: home
 
 hero:
-  name: "Ask Gemini MCP"
-  text: "AI-to-AI collaboration via the Gemini CLI"
-  tagline: "Get a second opinion from Gemini in any MCP-compatible AI assistant"
+  name: "Ask LLM"
+  text: "AI-to-AI collaboration via MCP"
+  tagline: "Bridge Claude with Gemini, Codex, and Ollama. Get second opinions, debate plans, and review code across AI providers."
   actions:
     - theme: brand
-      text: Full Setup Guide
+      text: Quick Start
       link: /getting-started
     - theme: alt
       text: View on GitHub
       link: https://github.com/Lykhoyda/ask-llm
     - theme: alt
-      text: npm package
-      link: https://www.npmjs.com/package/ask-gemini-mcp
+      text: npm packages
+      link: https://www.npmjs.com/search?q=ask-llm
 ---
 
 <div class="vp-doc home-content">
+
+<h2 class="section-title">Providers</h2>
+
+<div class="provider-grid">
+  <a href="/ask-llm/providers/gemini" class="provider-card" data-provider="gemini">
+    <span class="provider-name">Gemini</span>
+    <span class="provider-desc">Google's Gemini via CLI. 1M+ token context for massive codebase analysis.</span>
+    <span class="provider-pkg">npx ask-gemini-mcp</span>
+  </a>
+  <a href="/ask-llm/providers/codex" class="provider-card" data-provider="codex">
+    <span class="provider-name">Codex</span>
+    <span class="provider-desc">OpenAI's Codex CLI. GPT-5.4 with automatic mini fallback on quota.</span>
+    <span class="provider-pkg">npx ask-codex-mcp</span>
+  </a>
+  <a href="/ask-llm/providers/ollama" class="provider-card" data-provider="ollama">
+    <span class="provider-name">Ollama</span>
+    <span class="provider-desc">Local LLMs via Ollama HTTP. No API keys, fully private, zero cost.</span>
+    <span class="provider-pkg">npx ask-ollama-mcp</span>
+  </a>
+  <a href="/ask-llm/providers/unified" class="provider-card" data-provider="unified">
+    <span class="provider-name">Unified</span>
+    <span class="provider-desc">All providers in one server. Auto-detects available CLIs and registers tools.</span>
+    <span class="provider-pkg">npx ask-llm-mcp</span>
+  </a>
+</div>
 
 <h2 class="section-title">Installation</h2>
 
 <SetupTabs />
 
-  <div class="features-grid">
-    <div class="feature-card">
-      <div class="icon-wrapper">
-        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feature-icon"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-      </div>
-      <h3>Quick Setup</h3>
-      <p>Get started in minutes. Pick your client and add the MCP server. Requires <a href="https://nodejs.org/" target="_blank">Node.js</a> v20+ and <a href="https://github.com/google-gemini/gemini-cli" target="_blank">Gemini CLI</a> authenticated via <code>gemini login</code>.</p>
+<div class="features-grid">
+  <div class="feature-card">
+    <div class="icon-wrapper">
+      <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
     </div>
-    <div class="feature-card highlight">
-      <div class="icon-wrapper">
-        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feature-icon"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
-      </div>
-      <h3>Verify</h3>
-      <p>Ask your AI assistant: <code>Use Gemini ping to test the connection</code>. Got <em>Pong!</em> back? You're ready. See <a href="/ask-llm/usage/how-to-ask">How to Ask Gemini</a> for usage examples.</p>
-    </div>
-    <div class="feature-card">
-      <div class="icon-wrapper">
-        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feature-icon"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 Z"/></svg>
-      </div>
-      <h3>Seamless Integration</h3>
-      <p>Works as a standard MCP tool, meaning no strange prompt hacks. Your primary LLM transparently delegates secondary research, code reviews, or brainstorming tasks to Gemini APIs.</p>
-    </div>
-    <div class="feature-card">
-      <div class="icon-wrapper">
-        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feature-icon"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-      </div>
-      <h3>Multi-Turn Sessions</h3>
-      <p>Continue conversations with Gemini across multiple calls. Review code, then follow up for fixes — Gemini remembers the full context. See <a href="/ask-llm/usage/multi-turn-sessions">Multi-Turn Sessions</a> for details.</p>
-    </div>
+    <h3>Quick Setup</h3>
+    <p>Get started in minutes. Pick your client, add the MCP server, and you're live. Requires <a href="https://nodejs.org/" target="_blank">Node.js</a> v20+ and the relevant CLI authenticated.</p>
   </div>
+  <div class="feature-card highlight">
+    <div class="icon-wrapper">
+      <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+    </div>
+    <h3>Verify</h3>
+    <p>Ask your AI assistant: <code>Use Gemini ping to test the connection</code>. Got <em>Pong!</em> back? You're ready. See <a href="/ask-llm/usage/how-to-ask">How to Ask</a> for usage examples.</p>
+  </div>
+  <div class="feature-card">
+    <div class="icon-wrapper">
+      <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 Z"/></svg>
+    </div>
+    <h3>Standard MCP</h3>
+    <p>Works with 40+ MCP-compatible clients. No prompt hacks. Your primary LLM transparently delegates research, reviews, or brainstorming to other providers.</p>
+  </div>
+  <div class="feature-card">
+    <div class="icon-wrapper">
+      <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+    </div>
+    <h3>Multi-Turn Sessions</h3>
+    <p>Continue conversations across multiple calls. Review code, then follow up for fixes. See <a href="/ask-llm/usage/multi-turn-sessions">Multi-Turn Sessions</a> for details.</p>
+  </div>
+</div>
 
 <h2 class="section-title">Explore the Docs</h2>
 
@@ -68,7 +93,7 @@ hero:
     <div class="next-step-icon">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
     </div>
-    <span class="next-step-label">How to Ask Gemini</span>
+    <span class="next-step-label">How to Ask</span>
     <span class="next-step-desc">Usage patterns and examples</span>
   </a>
   <a href="/ask-llm/concepts/models" class="next-step-card">

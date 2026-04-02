@@ -1,0 +1,117 @@
+/* ================================================================
+   Ask LLM — Design Token System
+   Dark-only, monospace-first, indigo accent
+   Inspired by mastra.ai aesthetic
+   ================================================================ */
+
+:root {
+  /* ─── Brand ─────────────────────────────────── */
+  --color-brand: #818cf8;
+  --color-brand-dim: #6366f1;
+  --color-brand-deep: #4f46e5;
+  --color-brand-glow-faint: rgba(129, 140, 248, 0.08);
+  --color-brand-glow: rgba(129, 140, 248, 0.12);
+  --color-brand-glow-subtle: rgba(129, 140, 248, 0.15);
+  --color-brand-glow-medium: rgba(129, 140, 248, 0.18);
+  --color-brand-glow-strong: rgba(129, 140, 248, 0.25);
+  --color-brand-glow-hover: rgba(129, 140, 248, 0.3);
+
+  /* ─── Provider accents ───────────────────────── */
+  --color-gemini: #4285f4;
+  --color-codex: #10a37f;
+  --color-ollama: #ff6b35;
+  --color-unified: #818cf8;
+
+  /* ─── Surface ────────────────────────────────── */
+  --color-bg: #0a0a0b;
+  --color-bg-raised: #111113;
+  --color-bg-hover: #18181b;
+  --color-bg-elevated: #1c1c1f;
+  --color-bg-border: rgba(255, 255, 255, 0.08);
+  --color-bg-border-subtle: rgba(255, 255, 255, 0.05);
+  --color-bg-border-hover: rgba(255, 255, 255, 0.16);
+
+  /* ─── Text ───────────────────────────────────── */
+  --color-text-primary: #ededed;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #52525b;
+
+  /* ─── Status ─────────────────────────────────── */
+  --color-error: #f87171;
+  --color-success: #34d399;
+
+  /* ─── Typography ─────────────────────────────── */
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", Monaco, "Cascadia Code", ui-monospace,
+    monospace;
+  --font-heading: var(--font-sans);
+
+  /* ─── Spacing (4px base) ─────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ─── Radius ─────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* ─── Provider glow variants ──────────────────── */
+  --color-gemini-glow: rgba(66, 133, 244, 0.1);
+  --color-codex-glow: rgba(16, 163, 127, 0.1);
+  --color-ollama-glow: rgba(255, 107, 53, 0.1);
+  --color-unified-glow: rgba(129, 140, 248, 0.1);
+
+  /* ─── Anti-grid corner ───────────────────────── */
+  --corner-size: 10px;
+  --corner-size-sm: 6px;
+  --corner-size-lg: 12px;
+
+  /* ─── VitePress token remaps ─────────────────── */
+  --vp-c-brand-1: var(--color-brand);
+  --vp-c-brand-2: var(--color-brand-dim);
+  --vp-c-brand-3: var(--color-brand-deep);
+  --vp-c-brand-soft: var(--color-brand-glow);
+
+  --vp-c-bg: var(--color-bg);
+  --vp-c-bg-soft: var(--color-bg-raised);
+  --vp-c-bg-mute: var(--color-bg-hover);
+  --vp-c-bg-alt: var(--color-bg);
+
+  --vp-c-text-1: var(--color-text-primary);
+  --vp-c-text-2: var(--color-text-secondary);
+  --vp-c-text-3: var(--color-text-muted);
+
+  --vp-c-divider: var(--color-bg-border);
+  --vp-c-divider-light: var(--color-bg-border);
+
+  --vp-font-family-base: var(--font-sans);
+  --vp-font-family-mono: var(--font-mono);
+
+  --vp-code-block-bg: #0d0d10;
+
+  /* ─── Misc VitePress overrides ───────────────── */
+  --vp-c-default-1: var(--color-text-primary);
+  --vp-c-default-2: var(--color-text-secondary);
+  --vp-c-default-3: var(--color-text-muted);
+  --vp-c-default-soft: var(--color-bg-raised);
+
+  --vp-button-brand-bg: var(--color-brand);
+  --vp-button-brand-hover-bg: var(--color-brand-dim);
+  --vp-button-brand-active-bg: var(--color-brand-deep);
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-text: #fff;
+
+  --vp-button-alt-bg: var(--color-bg-hover);
+  --vp-button-alt-hover-bg: var(--color-bg-elevated);
+  --vp-button-alt-border: var(--color-bg-border);
+  --vp-button-alt-hover-border: var(--color-bg-border);
+  --vp-button-alt-text: var(--color-text-primary);
+}
