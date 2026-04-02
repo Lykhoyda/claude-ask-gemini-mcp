@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { Logger, PROTOCOL } from "@ask-llm/shared";
+import { createProgressTracker, Logger } from "@ask-llm/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
@@ -97,69 +97,12 @@ function buildAskLlmSchema(availableProviders: string[]) {
 
 type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
-interface ProgressHandle {
-  interval: NodeJS.Timeout;
-  stop: (success: boolean) => Promise<void>;
-  updateOutput: (output: string) => void;
-}
-
-async function sendProgressNotification(extra: ToolExtra, progress: number, total?: number, message?: string) {
-  const progressToken = extra._meta?.progressToken;
-  if (!progressToken) return;
-  try {
-    const params: Record<string, unknown> = { progressToken, progress };
-    if (total !== undefined) params.total = total;
-    if (message) params.message = message;
-    await extra.sendNotification({ method: PROTOCOL.NOTIFICATIONS.PROGRESS, params } as ServerNotification);
-  } catch (error) {
-    Logger.error("Failed to send progress notification:", error);
-  }
-}
-
-function startProgressUpdates(operationName: string, extra: ToolExtra): ProgressHandle {
-  let active = true;
-  let latestOutput = "";
-
-  const msgs = [
-    `${operationName} - Processing your request...`,
-    `${operationName} - Generating insights...`,
-    `${operationName} - Large analysis in progress...`,
-    `${operationName} - Still working...`,
-  ];
-  let idx = 0;
-  let progress = 0;
-
-  sendProgressNotification(extra, 0, undefined, `Starting ${operationName}`);
-
-  const interval = setInterval(async () => {
-    if (active) {
-      progress += 1;
-      const base = msgs[idx % msgs.length];
-      const preview = latestOutput.slice(-150).trim();
-      await sendProgressNotification(extra, progress, undefined, preview ? `${base}\nOutput: ...${preview}` : base);
-      idx++;
-    } else {
-      clearInterval(interval);
-    }
-  }, PROTOCOL.KEEPALIVE_INTERVAL);
-
-  return {
-    interval,
-    async stop(success: boolean) {
-      active = false;
-      clearInterval(interval);
-      await sendProgressNotification(
-        extra,
-        100,
-        100,
-        success ? `${operationName} completed` : `${operationName} failed`,
-      );
-    },
-    updateOutput(output: string) {
-      latestOutput = output;
-    },
-  };
-}
+const PROGRESS_MESSAGES = (op: string) => [
+  `${op} - Processing your request...`,
+  `${op} - Generating insights...`,
+  `${op} - Large analysis in progress...`,
+  `${op} - Still working...`,
+];
 
 export async function startServer() {
   Logger.debug("init ask-llm-mcp");
@@ -179,7 +122,7 @@ export async function startServer() {
       annotations: { title: "Ask LLM", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     async (args: Record<string, unknown>, extra: ToolExtra): Promise<CallToolResult> => {
-      const progress = startProgressUpdates("ask-llm", extra);
+      const progress = createProgressTracker("ask-llm", extra, PROGRESS_MESSAGES("ask-llm"));
       try {
         const { provider, prompt, model } = askLlmSchema.parse(args);
         Logger.toolInvocation("ask-llm", args);

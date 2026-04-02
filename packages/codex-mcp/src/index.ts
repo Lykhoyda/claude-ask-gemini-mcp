@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import type { BaseToolArguments } from "@ask-llm/shared";
-import { Logger, PROTOCOL } from "@ask-llm/shared";
+import { createProgressTracker, Logger } from "@ask-llm/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
@@ -23,78 +23,13 @@ type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
 
 const server = new McpServer({ name, version });
 
-interface ProgressHandle {
-  interval: NodeJS.Timeout;
-  stop: (success: boolean) => Promise<void>;
-  updateOutput: (output: string) => void;
-}
-
-async function sendProgressNotification(extra: ToolExtra, progress: number, total?: number, message?: string) {
-  const progressToken = extra._meta?.progressToken;
-  if (!progressToken) return;
-
-  try {
-    const params: Record<string, unknown> = { progressToken, progress };
-    if (total !== undefined) params.total = total;
-    if (message) params.message = message;
-
-    await extra.sendNotification({
-      method: PROTOCOL.NOTIFICATIONS.PROGRESS,
-      params,
-    } as ServerNotification);
-  } catch (error) {
-    Logger.error("Failed to send progress notification:", error);
-  }
-}
-
-function startProgressUpdates(operationName: string, extra: ToolExtra): ProgressHandle {
-  let active = true;
-  let latestOutput = "";
-
-  const progressMessages = [
-    `${operationName} - Codex is analyzing your request...`,
-    `${operationName} - Processing and generating insights...`,
-    `${operationName} - Creating structured response for your review...`,
-    `${operationName} - Large analysis in progress (this is normal for big requests)...`,
-    `${operationName} - Still working... Codex takes time for quality results...`,
-  ];
-
-  let messageIndex = 0;
-  let progress = 0;
-
-  sendProgressNotification(extra, 0, undefined, `Starting ${operationName}`);
-
-  const interval = setInterval(async () => {
-    if (active) {
-      progress += 1;
-      const baseMessage = progressMessages[messageIndex % progressMessages.length];
-      const outputPreview = latestOutput.slice(-150).trim();
-      const message = outputPreview ? `${baseMessage}\nOutput: ...${outputPreview}` : baseMessage;
-
-      await sendProgressNotification(extra, progress, undefined, message);
-      messageIndex++;
-    } else {
-      clearInterval(interval);
-    }
-  }, PROTOCOL.KEEPALIVE_INTERVAL);
-
-  return {
-    interval,
-    async stop(success: boolean) {
-      active = false;
-      clearInterval(interval);
-      await sendProgressNotification(
-        extra,
-        100,
-        100,
-        success ? `${operationName} completed` : `${operationName} failed`,
-      );
-    },
-    updateOutput(output: string) {
-      latestOutput = output;
-    },
-  };
-}
+const PROGRESS_MESSAGES = (op: string) => [
+  `${op} - Codex is analyzing your request...`,
+  `${op} - Processing and generating insights...`,
+  `${op} - Creating structured response for your review...`,
+  `${op} - Large analysis in progress (this is normal for big requests)...`,
+  `${op} - Still working... Codex takes time for quality results...`,
+];
 
 for (const tool of toolRegistry) {
   const shape = (tool.zodSchema as z.ZodObject<z.ZodRawShape>).shape;
@@ -104,7 +39,7 @@ for (const tool of toolRegistry) {
     { description: tool.description, inputSchema: shape, annotations: tool.annotations },
     async (args: Record<string, unknown>, extra: ToolExtra): Promise<CallToolResult> => {
       const toolName = tool.name;
-      const handle = startProgressUpdates(toolName, extra);
+      const handle = createProgressTracker(toolName, extra, PROGRESS_MESSAGES(toolName));
 
       try {
         const toolArgs = args as unknown as BaseToolArguments;
