@@ -60,13 +60,30 @@ jobs:
         run: |
           curl -sL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
 
-      - name: Sync version from tag to server.json
+      - name: Sync versions from tag to server.json files
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          jq --arg v "$VERSION" '(.version = $v) | (.packages[0].version = $v)' server.json > server.tmp && mv server.tmp server.json
+          for f in server.json packages/codex-mcp/server.json packages/ollama-mcp/server.json packages/llm-mcp/server.json; do
+            jq --arg v "$VERSION" '(.version = $v) | (.packages[0].version = $v)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+          done
 
       - run: ./mcp-publisher login github-oidc
-      - run: ./mcp-publisher publish
+
+      - name: Publish ask-gemini to MCP Registry
+        run: ./mcp-publisher publish
+        continue-on-error: true
+
+      - name: Publish ask-codex to MCP Registry
+        run: ./mcp-publisher publish --server-json packages/codex-mcp/server.json
+        continue-on-error: true
+
+      - name: Publish ask-ollama to MCP Registry
+        run: ./mcp-publisher publish --server-json packages/ollama-mcp/server.json
+        continue-on-error: true
+
+      - name: Publish ask-llm to MCP Registry
+        run: ./mcp-publisher publish --server-json packages/llm-mcp/server.json
+        continue-on-error: true
 
       # GitHub Release with auto-generated changelog
       - name: Create GitHub Release
