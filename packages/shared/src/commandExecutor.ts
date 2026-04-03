@@ -38,8 +38,14 @@ export async function executeCommand(
     const childProcess = spawn(command, safeArgs, {
       env: process.env,
       shell: IS_WINDOWS,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+
+    // Close stdin immediately to signal EOF. Using "pipe" + end() instead of
+    // "ignore" (/dev/null) prevents stdin pipe errors in CLIs that probe stdin
+    // (e.g., Codex CLI when spawned from agent sub-processes). See issue #19.
+    childProcess.stdin.on("error", () => {});
+    childProcess.stdin.end();
 
     const stdoutChunks: Buffer[] = [];
     let stderr = "";

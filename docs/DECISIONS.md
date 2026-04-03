@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-042: Fix Codex stdin Pipe Error in Agent Sub-Processes
+- **Date:** 2026-04-03
+- **Status:** Accepted
+- **Context:** Issue #19 — Codex CLI fails with "stdin pipe error" when called from the brainstorm-coordinator agent, while working fine in direct tool calls. Root cause: `commandExecutor.ts` used `stdio: ["ignore", "pipe", "pipe"]`, setting stdin to `/dev/null`. Codex CLI probes stdin during initialization, and in agent sub-process context `/dev/null` causes a broken pipe. This is the same class of bug as the Gemini "exit code 42" issue (ADR-015), but Gemini's fix (use `-p` flag) doesn't apply to Codex.
+- **Decision:** Changed stdin from `"ignore"` to `"pipe"` with immediate `.end()` call. Added a no-op error handler on stdin to absorb EPIPE if the child process exits before the close completes. This gives all child processes a proper EOF-terminated pipe instead of `/dev/null`.
+- **Consequences:** Fixes Codex in brainstorm-coordinator. Applies to all providers (Gemini, Codex) but is safe — Gemini already uses `-p` for non-interactive mode, so a proper EOF pipe is equivalent. No behavior change for working providers.
+
 ## ADR-041: Extract ProgressHandle into @ask-llm/shared
 - **Date:** 2026-04-02
 - **Status:** Accepted
