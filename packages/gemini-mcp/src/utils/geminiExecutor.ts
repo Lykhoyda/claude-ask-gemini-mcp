@@ -13,7 +13,7 @@ import {
   summarizeChangeModeEdits,
   validateChangeModeEdits,
 } from "@ask-llm/shared";
-import { CLI, ERROR_MESSAGES, MODELS, STATUS_MESSAGES } from "../constants.js";
+import { CLI, ERROR_MESSAGES, MODELS, QUOTA_PATTERNS, STATUS_MESSAGES } from "../constants.js";
 
 interface GeminiModelTokens {
   input?: number;
@@ -303,8 +303,9 @@ ${promptProcessed}
     return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage.includes(ERROR_MESSAGES.QUOTA_EXCEEDED) && model !== MODELS.FLASH) {
-      Logger.warn(`${ERROR_MESSAGES.QUOTA_EXCEEDED}. Falling back to ${MODELS.FLASH}.`);
+    const isQuotaError = QUOTA_PATTERNS.some((pattern) => errorMessage.toLowerCase().includes(pattern.toLowerCase()));
+    if (isQuotaError && model !== MODELS.FLASH) {
+      Logger.warn(`Gemini quota exceeded. Falling back to ${MODELS.FLASH}.`);
       Logger.debug(`Status: ${STATUS_MESSAGES.FLASH_RETRY}`);
       const fallbackArgs = buildArgs(promptProcessed, MODELS.FLASH, sandbox, sessionId, includeDirs);
       try {

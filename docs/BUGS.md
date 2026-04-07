@@ -55,6 +55,18 @@
 - **Description:** The `GeminiModelTokens` interface included a `thoughts` field and the Gemini CLI returns thinking token counts, but `formatStats` never displayed them. Users had no visibility into how many thinking tokens Gemini used.
 - **Fix:** Added `if (tokens.thoughts != null && tokens.thoughts > 0) parts.push(...)` to `formatStats`, displayed between output tokens and cached count.
 
+### ~~Gemini quota fallback fails with newer CLI versions~~ FIXED
+- **Severity:** High
+- **Issue:** #21
+- **Description:** Gemini CLI changed its quota error format. Newer versions return `TerminalQuotaError: You have exhausted your capacity on this model` instead of `RESOURCE_EXHAUSTED`. The executor's fallback detection only matched the old format, so Pro → Flash fallback silently broke.
+- **Fix:** Added `QUOTA_PATTERNS` array with three patterns (`RESOURCE_EXHAUSTED`, `TerminalQuotaError`, `exhausted your capacity`). Executor uses case-insensitive multi-pattern matching. See ADR-044.
+
+### ~~Claude Desktop 4-minute timeout for Codex provider~~ FIXED
+- **Severity:** High
+- **Issue:** #20
+- **Description:** Claude Desktop has a hard 4-minute client-side timeout. The server's default timeout was 5 minutes, so the client gave up before the server could return a meaningful error. The timeout handler also had a race condition — it killed the process but didn't immediately reject the promise.
+- **Fix:** Lowered default timeout to 210s (3.5 min, below Claude Desktop's 4-min limit). Timeout handler now immediately rejects with actionable error message. See ADR-045.
+
 ## Shared Layer — Known Technical Debt
 
 ### ~~commandExecutor.ts contains Gemini-specific quota detection~~ FIXED

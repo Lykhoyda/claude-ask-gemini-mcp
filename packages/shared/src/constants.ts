@@ -23,7 +23,7 @@ export const PROTOCOL = {
 } as const;
 
 export const EXECUTION = {
-  DEFAULT_TIMEOUT_MS: 300_000,
+  DEFAULT_TIMEOUT_MS: 210_000,
   TIMEOUT_ENV_VAR: "GMCPT_TIMEOUT_MS",
   ERROR_TRUNCATE_LENGTH: 2000,
 } as const;

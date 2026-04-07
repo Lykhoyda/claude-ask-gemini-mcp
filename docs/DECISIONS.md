@@ -1,5 +1,19 @@
 # Architectural Decisions
 
+## ADR-044: Fix Gemini Quota Fallback Detection for Newer CLI Versions
+- **Date:** 2026-04-06
+- **Status:** Accepted
+- **Context:** Gemini CLI changed its quota error format in newer versions. The original executor only checked for `RESOURCE_EXHAUSTED` in error messages, but newer CLI versions return `TerminalQuotaError: You have exhausted your capacity on this model` — a completely different string. This caused the fallback from Pro → Flash to silently fail, crashing instead of degrading gracefully. Reported in GitHub issue #21.
+- **Decision:** Added a `QUOTA_PATTERNS` array in `gemini-mcp/constants.ts` with three patterns: `RESOURCE_EXHAUSTED` (original gRPC status), `TerminalQuotaError` (new CLI error class), and `exhausted your capacity` (new error message text). The executor now uses case-insensitive matching against all patterns. Rejected adding `"quota exceeded"` as too broad (false-positived on stringified error arrays in tests).
+- **Consequences:** Fallback to Flash now works for both old and new Gemini CLI versions. The unified `ask-llm-mcp` server also benefits since it dynamically imports the same executor. New patterns can be added to the array as the CLI evolves.
+
+## ADR-045: Lower Default Timeout to 210s for Claude Desktop Compatibility
+- **Date:** 2026-04-06
+- **Status:** Accepted
+- **Context:** Claude Desktop has a hard 4-minute (240s) client-side timeout for MCP tool calls. The previous default server-side timeout was 5 minutes (300s). When a Codex CLI call took >4 minutes, Claude Desktop showed a generic "MCP server unresponsive" error before the server could return a meaningful timeout. The server also had a race condition: on timeout, it killed the process but didn't immediately reject the promise — waiting for the `close` event which could fire with confusing output. Reported in GitHub issue #20.
+- **Decision:** (1) Lowered `DEFAULT_TIMEOUT_MS` from 300,000 to 210,000 (3.5 minutes) — 30s below Claude Desktop's limit. (2) Changed the timeout handler to immediately reject with a descriptive error message including the current timeout value and `GMCPT_TIMEOUT_MS` override hint. (3) Process cleanup (SIGTERM → SIGKILL) continues in the background after rejection.
+- **Consequences:** Server-side timeout errors now reach the user before Claude Desktop's client timeout. Error messages are actionable ("try shorter prompt or increase GMCPT_TIMEOUT_MS"). Users needing longer can set the env var. All MCP clients benefit from faster, clearer timeout feedback.
+
 ## ADR-043: Move Smoke Tests from GA to Local Husky Pre-Push Hook
 - **Date:** 2026-04-06
 - **Status:** Accepted

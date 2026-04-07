@@ -33,6 +33,10 @@
 - [x] **Benchmark** — token overhead + latency comparison of MCP vs Skill vs Subagent vs Orchestrator (ADR-030, static analysis complete, manual runs pending)
 - See [design doc](plans/2026-02-26-ask-llm-mcp-design.md)
 
+## Priority 9: Bug Fixes (GitHub Issues)
+- [x] **#21 Gemini fallback** — Multi-pattern quota detection for newer CLI versions (ADR-044)
+- [x] **#20 Claude Desktop timeout** — Lowered default timeout to 210s, actionable error messages (ADR-045)
+
 ## Undecided / Potential Improvements
 - **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Would replace keepalive messages with live content streaming. High complexity, no user demand yet.
 - **Extract tool registration loop** — the for-of loop registering tools/prompts from `toolRegistry` is identical across gemini/codex/ollama servers. Could be a shared `registerTools(server, registry)` helper, but llm-mcp has a different pattern so the dedup gain is modest.

@@ -182,6 +182,32 @@ describe("executeGeminiCLI quota fallback", () => {
     await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow("Connection refused");
     expect(mockExecuteCommand).toHaveBeenCalledOnce();
   });
+
+  it("retries on TerminalQuotaError from newer Gemini CLI", async () => {
+    mockExecuteCommand
+      .mockRejectedValueOnce(
+        new Error("TerminalQuotaError: You have exhausted your capacity on this model. Your quota will reset after 3h34m21s."),
+      )
+      .mockResolvedValueOnce(JSON.stringify({ response: "Flash response" }));
+
+    const result = await executeGeminiCLI({ prompt: "hello" });
+
+    expect(result.response).toContain("Flash response");
+    expect(mockExecuteCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries on 'exhausted your capacity' JSON error", async () => {
+    mockExecuteCommand
+      .mockRejectedValueOnce(
+        new Error("You have exhausted your capacity on this model."),
+      )
+      .mockResolvedValueOnce(JSON.stringify({ response: "Flash response" }));
+
+    const result = await executeGeminiCLI({ prompt: "hello" });
+
+    expect(result.response).toContain("Flash response");
+    expect(mockExecuteCommand).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("executeGeminiCLI changeMode", () => {

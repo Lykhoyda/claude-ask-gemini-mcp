@@ -54,14 +54,21 @@ export async function executeCommand(
     const timeoutMs = getTimeoutMs();
     const timer = setTimeout(() => {
       if (isResolved) return;
+      isResolved = true;
       Logger.warn(`[cmd:${commandId}] Timeout after ${timeoutMs}ms, sending SIGTERM`);
       childProcess.kill("SIGTERM");
       setTimeout(() => {
-        if (!isResolved) {
-          Logger.warn(`[cmd:${commandId}] SIGKILL after grace period`);
+        try {
           childProcess.kill("SIGKILL");
-        }
+        } catch {}
       }, 5000);
+      const timeoutSec = Math.round(timeoutMs / 1000);
+      reject(
+        new Error(
+          `Command timed out after ${timeoutSec}s. The LLM provider took too long to respond. ` +
+            `Try a shorter prompt or increase the timeout via GMCPT_TIMEOUT_MS environment variable (current: ${timeoutMs}ms).`,
+        ),
+      );
     }, timeoutMs);
 
     childProcess.stdout.on("data", (data: Buffer) => {
