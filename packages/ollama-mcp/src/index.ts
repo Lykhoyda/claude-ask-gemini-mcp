@@ -108,6 +108,7 @@ export function createSandboxServer(): McpServer {
 
 export async function startServer() {
   Logger.debug("init ask-ollama-mcp");
+  Logger.checkNodeVersion();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   Logger.debug("ask-ollama-mcp listening on stdio");

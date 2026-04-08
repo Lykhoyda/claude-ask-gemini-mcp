@@ -106,6 +106,7 @@ const PROGRESS_MESSAGES = (op: string) => [
 
 export async function startServer() {
   Logger.debug("init ask-llm-mcp");
+  Logger.checkNodeVersion();
   const { name, version } = readPackageJson();
   const { available } = await detectProviders();
 

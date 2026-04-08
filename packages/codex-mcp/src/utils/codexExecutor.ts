@@ -106,7 +106,16 @@ function isQuotaError(error: unknown): boolean {
 }
 
 function buildArgs(prompt: string, model: string): string[] {
-  return [CLI.COMMANDS.EXEC, CLI.FLAGS.SKIP_GIT, CLI.FLAGS.EPHEMERAL, CLI.FLAGS.JSON, CLI.FLAGS.MODEL, model, prompt];
+  return [
+    CLI.COMMANDS.EXEC,
+    CLI.FLAGS.SKIP_GIT,
+    CLI.FLAGS.EPHEMERAL,
+    CLI.FLAGS.FULL_AUTO,
+    CLI.FLAGS.JSON,
+    CLI.FLAGS.MODEL,
+    model,
+    prompt,
+  ];
 }
 
 export async function executeCodexCLI(options: CodexExecutorOptions): Promise<CodexExecutorResult> {

@@ -109,6 +109,7 @@ export function createSandboxServer(): McpServer {
 
 export async function startServer() {
   Logger.debug("init ask-codex-mcp");
+  Logger.checkNodeVersion();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   Logger.debug("ask-codex-mcp listening on stdio");

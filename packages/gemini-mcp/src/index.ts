@@ -109,6 +109,7 @@ export function createSandboxServer(): McpServer {
 
 export async function startServer() {
   Logger.debug("init ask-gemini-mcp");
+  Logger.checkNodeVersion();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   Logger.debug("ask-gemini-mcp listening on stdio");

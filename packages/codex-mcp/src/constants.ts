@@ -27,5 +27,6 @@ export const CLI = {
     SKIP_GIT: "--skip-git-repo-check",
     EPHEMERAL: "--ephemeral",
     JSON: "--json",
+    FULL_AUTO: "--full-auto",
   },
 } as const;

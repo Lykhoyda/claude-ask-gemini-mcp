@@ -64,8 +64,14 @@
 ### ~~Claude Desktop 4-minute timeout for Codex provider~~ FIXED
 - **Severity:** High
 - **Issue:** #20
-- **Description:** Claude Desktop has a hard 4-minute client-side timeout. The server's default timeout was 5 minutes, so the client gave up before the server could return a meaningful error. The timeout handler also had a race condition — it killed the process but didn't immediately reject the promise.
-- **Fix:** Lowered default timeout to 210s (3.5 min, below Claude Desktop's 4-min limit). Timeout handler now immediately rejects with actionable error message. See ADR-045.
+- **Description:** Claude Desktop has a hard 4-minute client-side timeout. The server's default timeout was 5 minutes, so the client gave up before the server could return a meaningful error. Additionally, Codex CLI hung waiting for interactive approval prompts that can never arrive in MCP subprocess contexts.
+- **Fix:** (1) Lowered default timeout to 210s (3.5 min, below Claude Desktop's 4-min limit). Timeout handler now immediately rejects with actionable error message. See ADR-045. (2) Added `--full-auto` flag to Codex CLI args so it never waits for approval. See ADR-046.
+
+### ~~Node.js v18 incompatibility with gemini-cli~~ MITIGATED
+- **Severity:** Medium
+- **Issue:** Part of ANT-242
+- **Description:** Claude Desktop may resolve a different Node.js binary (e.g., v18) than the user's shell. gemini-cli 0.36.0 uses ES2024 regex `v` flag which crashes on Node <20 with a cryptic `SyntaxError`.
+- **Fix:** Added `Logger.checkNodeVersion()` at startup in all 4 servers. Logs error-level warning if Node <20 detected. See ADR-046.
 
 ## Shared Layer — Known Technical Debt
 

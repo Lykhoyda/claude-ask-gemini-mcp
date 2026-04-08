@@ -43,6 +43,7 @@ describe("executeCodexCLI argument construction", () => {
       CLI.COMMANDS.EXEC,
       CLI.FLAGS.SKIP_GIT,
       CLI.FLAGS.EPHEMERAL,
+      CLI.FLAGS.FULL_AUTO,
       CLI.FLAGS.JSON,
       CLI.FLAGS.MODEL,
       MODELS.DEFAULT,

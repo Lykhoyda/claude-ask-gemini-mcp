@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-046: Add --full-auto to Codex CLI and Node.js Version Check
+- **Date:** 2026-04-08
+- **Status:** Accepted
+- **Context:** Codex CLI spawned from MCP subprocess hangs indefinitely when it needs approval for shell commands. Without `--full-auto`, the CLI waits for interactive input that can never arrive (stdin is closed). This causes every Codex call through ask-codex-mcp and ask-llm-mcp to timeout. Additionally, Claude Desktop may resolve a different Node.js binary than the user's shell — gemini-cli 0.36.0 uses the ES2024 regex `v` flag which crashes on Node <20, producing a cryptic `SyntaxError` instead of a useful message.
+- **Decision:** (1) Added `--full-auto` flag to Codex CLI args in `codexExecutor.ts`. This sets `-a on-request --sandbox workspace-write` — automatic execution in a sandboxed mode, no interactive prompts. (2) Added `Logger.checkNodeVersion()` to all 4 server startup functions. It logs an error-level warning if running on Node <20, explaining that some providers use ES2024 features.
+- **Consequences:** Codex calls no longer hang on approval prompts in MCP contexts. Users on Node <20 get a clear diagnostic message instead of a cryptic regex SyntaxError. The `--full-auto` flag is safe for MCP use because Codex `exec` is already designed for non-interactive use and the sandbox prevents destructive operations.
+
 ## ADR-044: Fix Gemini Quota Fallback Detection for Newer CLI Versions
 - **Date:** 2026-04-06
 - **Status:** Accepted
