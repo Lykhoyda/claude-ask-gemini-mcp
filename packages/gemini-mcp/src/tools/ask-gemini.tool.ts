@@ -7,6 +7,7 @@ const askGeminiArgsSchema = z.object({
   prompt: z
     .string()
     .min(1)
+    .max(100000)
     .describe(
       "The question, code review request, or analysis task to send to Gemini CLI. Use @ syntax to include files (e.g., '@largefile.js explain this')",
     ),

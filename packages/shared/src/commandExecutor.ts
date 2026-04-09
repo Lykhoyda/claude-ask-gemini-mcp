@@ -5,6 +5,28 @@ import { getSpawnEnv } from "./shellPath.js";
 
 const IS_WINDOWS = process.platform === "win32";
 
+export function sanitizeErrorForLLM(stderr: string, command: string): string {
+  if (stderr.includes("Invalid regular expression flags") && stderr.includes("Node.js v")) {
+    const nodeVersion = stderr.match(/Node\.js (v[\d.]+)/)?.[1] ?? "unknown";
+    return `${command} CLI requires Node.js v20+ but is running on ${nodeVersion}. The user should update their Node version or set ASK_LLM_PATH in their MCP config to point to a Node v20+ installation.`;
+  }
+
+  if (stderr.includes("command not found") || stderr.includes("ENOENT")) {
+    return `${command} CLI not found on PATH. Ensure it is installed and accessible. Run "which ${command}" in a terminal to verify.`;
+  }
+
+  if (stderr.includes("EACCES") || stderr.includes("Permission denied")) {
+    return `Permission denied when running ${command} CLI. Check file permissions and try running with appropriate access.`;
+  }
+
+  const firstLine = stderr.split("\n")[0].trim();
+  if (firstLine.length > 0 && firstLine.length < 300) {
+    return firstLine;
+  }
+
+  return stderr.length > 500 ? `${stderr.slice(0, 500)}... (truncated)` : stderr;
+}
+
 function getTimeoutMs(): number {
   const envVal = process.env[EXECUTION.TIMEOUT_ENV_VAR];
   if (envVal) {
@@ -107,8 +129,9 @@ export async function executeCommand(
         } else {
           Logger.commandComplete(commandId, code);
           Logger.error(`Failed with exit code ${code}`);
-          const errorMessage = stderr.trim() || "Unknown error";
-          reject(new Error(`Command failed with exit code ${code}: ${errorMessage}`));
+          const rawError = stderr.trim() || "Unknown error";
+          const userMessage = sanitizeErrorForLLM(rawError, command);
+          reject(new Error(userMessage));
         }
       }
     });

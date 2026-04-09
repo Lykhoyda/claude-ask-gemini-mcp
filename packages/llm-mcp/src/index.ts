@@ -90,7 +90,7 @@ function buildAskLlmSchema(availableProviders: string[]) {
     provider: z
       .enum(providerEnum as [string, ...string[]])
       .describe(`Which LLM provider to use. Available: ${providerDescriptions}`),
-    prompt: z.string().min(1).describe("The question, code review request, or analysis task to send"),
+    prompt: z.string().min(1).max(100000).describe("The question, code review request, or analysis task to send"),
     model: z.string().optional().describe("Override the default model. Usually not needed."),
   });
 }

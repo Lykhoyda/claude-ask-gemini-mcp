@@ -4,7 +4,11 @@ import { ERROR_MESSAGES, MODELS, STATUS_MESSAGES } from "../constants.js";
 import { executeCodexCLI } from "../utils/codexExecutor.js";
 
 const askCodexArgsSchema = z.object({
-  prompt: z.string().min(1).describe("The question, code review request, or analysis task to send to Codex CLI"),
+  prompt: z
+    .string()
+    .min(1)
+    .max(100000)
+    .describe("The question, code review request, or analysis task to send to Codex CLI"),
   model: z
     .string()
     .optional()

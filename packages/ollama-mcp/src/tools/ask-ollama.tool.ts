@@ -4,7 +4,11 @@ import { ERROR_MESSAGES, MODELS, STATUS_MESSAGES } from "../constants.js";
 import { executeOllamaCLI } from "../utils/ollamaExecutor.js";
 
 const askOllamaArgsSchema = z.object({
-  prompt: z.string().min(1).describe("The question, code review request, or analysis task to send to Ollama"),
+  prompt: z
+    .string()
+    .min(1)
+    .max(100000)
+    .describe("The question, code review request, or analysis task to send to Ollama"),
   model: z
     .string()
     .optional()

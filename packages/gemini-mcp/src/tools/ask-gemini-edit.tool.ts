@@ -7,6 +7,7 @@ const askGeminiEditArgsSchema = z.object({
   prompt: z
     .string()
     .min(1)
+    .max(100000)
     .describe(
       "Describe the code changes you want. Reference files with @ syntax (e.g., '@src/app.ts refactor the error handling'). Gemini will return structured OLD/NEW edit blocks that can be applied directly.",
     ),
@@ -17,10 +18,14 @@ const askGeminiEditArgsSchema = z.object({
       `DO NOT set this parameter. The tool automatically uses ${MODELS.PRO} and falls back to ${MODELS.FLASH} on quota errors.`,
     ),
   includeDirs: z
-    .array(z.string())
+    .array(
+      z.string().refine((dir) => !dir.includes("..") && !dir.startsWith("/"), {
+        message: "Directory paths must be relative and cannot contain '..'",
+      }),
+    )
     .optional()
     .describe(
-      "Additional directories to include in Gemini's context. Useful for monorepos where the code lives outside the current working directory.",
+      "Additional directories to include in Gemini's context. Must be relative paths (e.g., 'packages/api'). Useful for monorepos.",
     ),
 });
 
