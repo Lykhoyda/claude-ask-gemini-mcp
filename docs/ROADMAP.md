@@ -39,8 +39,18 @@
 - [x] **ANT-242 Codex hangs + Node detection** — Added `--full-auto` flag, Node.js v20+ startup check (ADR-046)
 - [x] **Shell PATH resolution** — macOS GUI apps (Claude Desktop) don't inherit shell PATH; added login shell extraction + heuristic fallback (ADR-047)
 
+## Priority 10: MCP Best Practices & Plugin Quality
+- [x] **Input validation** — `.max(100000)` on all prompt schemas, `path.isAbsolute()` on includeDirs (ADR-048 implied)
+- [x] **LLM-actionable errors** — `sanitizeErrorForLLM()` replaces raw stack traces with guidance
+- [x] **Test coverage** — 20 new tests for progressTracker, shellPath, sanitizeErrorForLLM (176→199)
+- [x] **Plugin hooks** — Extracted to shell scripts, configurable timeout, PATH resolution
+- [x] **Agent tool restrictions** — Reviewers limited to Bash/Glob/Grep/Read + provider MCP
+- [x] **Skill trigger phrases** — Descriptions include invocation patterns for auto-matching
+
 ## Undecided / Potential Improvements
-- **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Would replace keepalive messages with live content streaming. High complexity, no user demand yet.
+- **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Would replace keepalive messages with live content streaming. Now available in Gemini CLI 0.37.0.
+- **Gemini `--approval-mode`** — New in 0.37.0: `default`, `auto_edit`, `yolo`, `plan`. Could use in hooks for safer non-interactive mode.
+- **MCP `outputSchema`** — Structured responses via `structuredContent`. SDK supports it but clients may not handle it yet. Deferred.
 - **Extract tool registration loop** — the for-of loop registering tools/prompts from `toolRegistry` is identical across gemini/codex/ollama servers. Could be a shared `registerTools(server, registry)` helper, but llm-mcp has a different pattern so the dedup gain is modest.
 
 ## Completed
