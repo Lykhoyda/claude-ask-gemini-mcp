@@ -56,7 +56,7 @@ hero:
 
 <h2 class="section-title">Installation</h2>
 
-<SetupTabs />
+<SetupTabs provider="unified" />
 
 <div class="features-grid">
   <div class="feature-card">
