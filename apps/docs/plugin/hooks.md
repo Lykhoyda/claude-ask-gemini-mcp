@@ -1,21 +1,8 @@
 # Hooks
 
-Hooks are automated actions that trigger on specific Claude Code events. The plugin configures two hooks that provide passive, advisory code review via Gemini without any manual invocation.
+Hooks are automated actions that trigger on specific Claude Code events. The plugin configures one hook that provides passive, advisory code review via Gemini without any manual invocation.
 
-## Stop Hook (Worktree Review)
-
-**Trigger:** When a Claude Code session ends.
-
-**Action:** Sends the current worktree diff to Gemini for a quick advisory review.
-
-**What it does:**
-1. Runs `git diff HEAD` to capture tracked changes in the worktree
-2. Truncates input to 50KB to stay within token limits
-3. Filters out sensitive files (secrets, keys, lock files)
-4. Pipes the filtered diff to `ask-gemini-run`
-5. Returns a concise 3-bullet review of critical issues
-
-> This reviews tracked worktree changes at the time the session ends, not a session-scoped diff. Untracked files are not included.
+> The plugin previously shipped a `Stop` hook that reviewed worktree changes when a Claude Code session ended. It was removed in [ADR-048](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md) because the `Stop` event fires per-turn rather than per-session, making it noisy and high-latency, and `git diff HEAD` excluded untracked files which silently dropped coverage on new-file sessions. Use the `/gemini-review` slash command for explicit on-demand reviews instead.
 
 ## Pre-Commit Hook
 
@@ -24,21 +11,22 @@ Hooks are automated actions that trigger on specific Claude Code events. The plu
 **Action:** Reviews staged changes and warns about critical issues. This is **advisory only** — it does not block the commit.
 
 **What it does:**
-1. Detects when a Bash command contains `git commit`
-2. Runs `git diff --staged` to capture what's about to be committed
-3. Filters out sensitive files
-4. Pipes to `ask-gemini-run` for a quick review
-5. Outputs warnings to stderr, then exits successfully
+1. Detects when a Bash command contains `git commit` (a `PreToolUse` matcher on the `Bash` tool)
+2. Runs `git diff --cached` to capture what's about to be committed
+3. Filters out sensitive files (secrets, keys, lock files)
+4. Truncates input to 50KB to stay within token limits
+5. Pipes the filtered diff to `gemini -p @tempfile` for a quick review
+6. Outputs warnings to stderr, then exits successfully
 
-> The hook always exits 0. It warns about issues but does not prevent the commit from proceeding.
+> The hook always exits 0. It warns about issues but does not prevent the commit from proceeding. A `trap` ensures the temp file is cleaned up even on signal interruption (ADR-040).
 
 ## Provider
 
-Both hooks are hardcoded to use Gemini via the `ask-gemini-run` binary. To use a different provider, you would need to edit `hooks/hooks.json` and change the binary (e.g., `ask-codex-run` or `ask-ollama-run`).
+The pre-commit hook is hardcoded to use Gemini via the `gemini` CLI directly. To use a different provider, you would need to edit `packages/claude-plugin/scripts/pre-commit-review.sh` and replace the `gemini -p` invocation with `codex exec --full-auto` or `ollama run`.
 
 ## CLI Binaries
 
-The hooks use CLI binaries that you can also call directly:
+The plugin also ships CLI binaries you can call directly from your shell — useful for piping diffs into a provider outside of any hook:
 
 ```bash
 # Pipe a diff to Gemini

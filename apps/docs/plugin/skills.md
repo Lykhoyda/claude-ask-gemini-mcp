@@ -48,26 +48,30 @@ Requires Ollama running locally with a model pulled (e.g., `qwen2.5-coder:7b`).
 
 ### `/brainstorm`
 
-Send a topic to multiple LLM providers in parallel and get synthesized analysis. The coordinator agent sends your topic to each provider, then synthesizes the responses into:
+Send a topic to multiple LLM providers AND have Claude Opus perform its own independent research in the same run, then synthesize all findings. The coordinator agent runs:
 
-- Consensus points (where providers agree)
-- Unique insights (ideas from only one provider)
-- Contradictions (where providers disagree)
-- Actionable recommendations
+1. **Phase 3B — Claude Opus research.** Claude reads the actual files, traces real code paths, fetches any referenced external docs, and forms independent findings tagged Verified or Inferred. Always runs — Claude is a first-class participant, not just an orchestrator (see [ADR-049](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)).
+2. **Phase 3A — External dispatch.** A single foreground blocking Bash call sends the topic to each requested external provider in parallel and waits for all of them. Up to 10 minutes total (Bash tool max). See [ADR-050](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md) for why this isn't a background-job dispatch.
+3. **Phase 4 — Synthesis.** Combines Claude's findings with the external responses:
+
+- Consensus points (where multiple participants agree — Claude verified + external = highest confidence)
+- Unique insights (findings from only one participant)
+- Contradictions (verified findings outrank inferred ones)
+- Actionable recommendations (prioritized by impact and confidence)
 
 ```text
-# Default providers (Gemini + Codex)
+# Default external providers (Gemini + Codex), plus Claude Opus always
 /brainstorm Should we use a monorepo or polyrepo for this project?
 
-# Custom providers
+# Custom external providers
 /brainstorm gemini,codex,ollama Review this authentication approach
 ```
 
-**Default providers:** `gemini,codex` (avoids unnecessary Ollama calls if not needed).
+**Default external providers:** `gemini,codex` (avoids unnecessary Ollama calls if not needed). **Claude Opus is always a participant** because it runs inside the coordinator — it isn't in the provider list.
 
 ### `/brainstorm-all`
 
-Shortcut for `/brainstorm gemini,codex,ollama <topic>`. Sends to all three providers including Ollama.
+Shortcut for `/brainstorm gemini,codex,ollama <topic>`. Sends to all three external providers (Gemini, Codex, Ollama) plus the always-on Claude Opus research phase — up to four participants total.
 
 ```text
 /brainstorm-all What's the best caching strategy for our API?

@@ -37,18 +37,23 @@ Sends code changes to a local Ollama model. All processing stays on your machine
 
 ### `brainstorm-coordinator`
 
-Orchestrates multi-LLM brainstorming sessions:
+Orchestrates multi-LLM brainstorming sessions with **Claude Opus as a first-class research participant**, not just an orchestrator. The agent runs four phases sequentially within a single sub-agent turn:
 
-1. Receives a topic and list of providers
-2. Sends the topic to each provider **in parallel**
-3. Collects all responses
-4. Synthesizes into a structured report:
-   - **Consensus** — Where all providers agree
-   - **Unique insights** — Ideas from only one provider
-   - **Contradictions** — Where providers disagree
-   - **Recommendations** — Actionable next steps
+**Phase 1 — Context Gathering.** Identify the topic, gather diffs/files/conversation context referenced by it.
 
-This agent is invoked by the `/brainstorm` and `/brainstorm-all` skills.
+**Phase 2 — Prompt Construction.** Build a structured prompt for the external providers (numbered points, pros/cons, deliverables).
+
+**Phase 3B — Claude Opus Research (runs first).** Claude reads the actual artifacts referenced by the topic with `Read`/`Glob`/`Grep`, traces real code paths, uses `WebFetch`/`WebSearch` for any referenced external docs, and forms its own independent findings. Each finding is tagged **Verified** (backed by an actual file Read or fetched doc) or **Inferred** (reasoned from the topic description). This phase MUST complete before Phase 3A so Claude cannot anchor on external responses — see [ADR-049](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md).
+
+**Phase 3A — External Provider Dispatch (runs after 3B).** A SINGLE foreground blocking Bash call dispatches all selected external providers in parallel via direct backgrounding (`cmd > out 2>&1 &`) plus per-PID `wait`, with `timeout: 600000` (10 min — the Bash tool maximum). Background jobs are explicitly forbidden because sub-agents cannot own processes that outlive their turn — Codex at high reasoning effort gets SIGKILLed silently otherwise. Per-provider stdout AND stderr are captured so failures are loud. See [ADR-050](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md).
+
+**Phase 4 — Synthesis.** Combines Claude's Phase 3B findings with the external responses:
+   - **Consensus** — Where multiple participants agree (verified Claude + external = highest confidence)
+   - **Unique insights** — Findings from only one participant
+   - **Contradictions** — Verified findings outrank inferred ones in tie-breaking
+   - **Recommendations** — Prioritized by impact and confidence
+
+The `Participants Consulted` section lists Claude Opus alongside Gemini/Codex/Ollama with a `(verified against real files: ...)` annotation for grounded findings. This agent is invoked by the `/brainstorm` and `/brainstorm-all` skills.
 
 ## Running Agents Directly
 
