@@ -51,7 +51,6 @@ claude mcp add --scope user ollama -- npx -y ask-ollama-mcp
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| Stop | Session end | Sends diff to Gemini for 3-bullet advisory review |
 | PreToolUse | Before `git commit` | Reviews staged changes, warns about critical issues |
 
 ## Requirements

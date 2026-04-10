@@ -124,7 +124,7 @@
 - [x] Add direct CLI binary `ask-gemini-run` (`src/run.ts`) — calls geminiExecutor directly, supports stdin piping
 - [x] Create subagent `gemini-reviewer.md` — isolated Gemini review in separate context
 - [x] Create `/gemini-review` skill — on-demand Gemini consultation via agent delegation
-- [x] Add Stop hook — background Gemini review of session changes
+- [x] ~~Add Stop hook — background Gemini review of session changes~~ **Removed (ADR-048)** — `Stop` event fired per-turn not per-session, and `git diff HEAD` missed untracked files. Use `/gemini-review` on demand instead.
 - [x] Add pre-commit hook — PreToolUse hook on Bash, reviews staged diff via Gemini before `git commit`
 - [x] Bundle as Claude Code plugin (`plugin.json`, `.mcp.json`, agents, skills, hooks)
 - [x] Add subpath export `ask-gemini-mcp/executor` for direct executor access (ADR-027)

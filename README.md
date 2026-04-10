@@ -20,10 +20,6 @@
 
 MCP servers that bridge your AI client with multiple LLM providers for AI-to-AI collaboration. Works with Claude Code, Claude Desktop, Cursor, Warp, Copilot, and [40+ other MCP clients](https://modelcontextprotocol.io/clients). Leverage Gemini's 1M+ token context, Codex's GPT-5.4, or local Ollama models — all via standard [MCP](https://modelcontextprotocol.io/).
 
-<a href="https://glama.ai/mcp/servers/@Lykhoyda/ask-llm">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@Lykhoyda/ask-llm/badge" alt="ask-gemini-mcp MCP server" />
-</a>
-
 ## Why?
 
 - **Get a second opinion** — Ask another AI to review your coding approach before committing
@@ -115,7 +111,6 @@ The **Ask LLM plugin** adds multi-provider code review, brainstorming, and autom
 | `/codex-review` | Codex-only review with confidence filtering |
 | `/ollama-review` | Local review — no data leaves your machine |
 | `/brainstorm` | Multi-LLM brainstorm: send a topic to providers in parallel, get synthesized analysis |
-| **Stop hook** | Automatic session diff review via Gemini when you end a session |
 | **Pre-commit hook** | Reviews staged changes before `git commit`, warns about critical issues |
 
 The review agents use a 4-phase pipeline inspired by [Anthropic's code-review plugin](https://github.com/anthropics/claude-code/tree/main/plugins/code-review): context gathering, prompt construction with explicit false-positive exclusions, synthesis, and source-level validation of each finding.

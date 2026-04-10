@@ -62,10 +62,9 @@ This gives you `gemini:ask-gemini` rather than `plugin:ask-llm:gemini:ask-gemini
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| Stop hook | Session end | Sends worktree diff to Gemini for a 3-bullet advisory review |
 | Pre-commit hook | Before `git commit` | Reviews staged changes and warns about critical issues (advisory, does not block) |
 
-Both hooks use the Gemini CLI directly (`gemini -p` with `@` file syntax).
+The hook uses the Gemini CLI directly (`gemini -p` with `@` file syntax).
 
 ### CLI Binaries
 
@@ -82,7 +81,7 @@ The plugin uses several Claude Code integration points:
 1. **`.mcp.json`** — Auto-registers the Gemini MCP server when the plugin is loaded
 2. **Skills** (`skills/`) — User-invocable slash commands that trigger review or brainstorm workflows
 3. **Agents** (`agents/`) — Handle the actual interaction with each provider using confidence-based filtering (80%+ threshold). Agents read `CLAUDE.md` for project conventions when available.
-4. **Hooks** (`hooks/`) — Automate advisory Gemini reviews on session stop and before commits
+4. **Hooks** (`hooks/`) — Automate advisory Gemini reviews before commits
 5. **CLI binaries** (`src/`) — Enable piped analysis from shell: `git diff | ask-gemini-run "review this"`
 
 ## Requirements

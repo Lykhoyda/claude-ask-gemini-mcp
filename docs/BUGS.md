@@ -103,15 +103,17 @@
 
 ## Claude Code Plugin — Known Limitations (from Gemini & Codex review)
 
-### Untracked files not included in Stop hook review
+### ~~Untracked files not included in Stop hook review~~ RESOLVED (removed)
 - **Severity:** Medium
 - **File:** `packages/claude-plugin/hooks/hooks.json`
-- **Description:** `git diff HEAD` excludes untracked files. Sessions that only create new files get no review from the Stop hook. Accepted for v1 — reviewing diffs of existing files is the primary use case.
+- **Description:** `git diff HEAD` excluded untracked files, so sessions that only created new files received no review.
+- **Resolution:** Stop hook removed entirely in ADR-048 — the bug was structural (wrong trigger semantic), not a simple fix. `/gemini-review` slash command remains available for on-demand review.
 
-### Stop hook blocks until Gemini returns
+### ~~Stop hook blocks until Gemini returns~~ RESOLVED (removed)
 - **Severity:** Medium
 - **File:** `packages/claude-plugin/hooks/hooks.json`
-- **Description:** The Stop hook runs synchronously, delaying session completion until Gemini responds. On large diffs this adds noticeable latency. Claude Code may not support `async` hooks yet — revisit when the platform adds support.
+- **Description:** The Stop hook ran synchronously, delaying completion on every Claude turn (not just session end — `Stop` fires per-turn) until Gemini responded, adding up to 60s of latency.
+- **Resolution:** Stop hook removed entirely in ADR-048. See the ADR for full rationale.
 
 ### Subagent inherits all tools (over-privileged)
 - **Severity:** Low
