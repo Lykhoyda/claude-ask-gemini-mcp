@@ -1,5 +1,12 @@
 # Architectural Decisions
 
+## ADR-053: Extract Shared Tool Registration into @ask-llm/shared/serverFactory
+- **Date:** 2026-04-13
+- **Status:** Accepted
+- **Context:** The three provider MCP servers (gemini-mcp, codex-mcp, ollama-mcp) had nearly identical `index.ts` files (~117 lines each). Lines 34-87 (the tool registration loop, prompt registration loop) and lines 89-108 (`createSandboxServer`) were copy-pasted with only the progress message strings differing between providers. This violated DRY and meant any change to the registration pattern (e.g., adding error sanitization, changing progress behavior) required editing three files identically.
+- **Decision:** Extracted two functions into `packages/shared/src/serverFactory.ts`: (1) `registerTools()` — takes a server instance, tool registry, executeTool/getPromptMessage functions, and provider-specific progress messages, then registers all tools and prompts on the server; (2) `createSandboxServer()` — creates a sandboxed McpServer with stub handlers for all tools and prompts. Each provider's `index.ts` was reduced from ~117 lines to ~41 lines, keeping only the provider-specific code: fallback package name, progress message strings, and `startServer()` log prefix. The `llm-mcp` orchestrator was intentionally excluded — it has a fundamentally different pattern (dynamic provider discovery, runtime schema building) that doesn't fit the shared loop.
+- **Consequences:** ~130 net lines eliminated across the monorepo. Future changes to tool registration (e.g., adding structured error responses, modifying progress tracking) only need to be made in one place. All 197 tests pass, lint clean.
+
 ## ADR-052: Rewrite workspace:* → * in Published MCP Packages to Fix npm 9 EUNSUPPORTEDPROTOCOL
 - **Date:** 2026-04-10
 - **Status:** Accepted

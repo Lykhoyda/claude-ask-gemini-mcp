@@ -56,7 +56,7 @@
 - **Streaming JSON output** — expose `--output-format stream-json` for real-time JSONL progress events (`init`, `message`, `tool_use`, `result`). Would replace keepalive messages with live content streaming. Now available in Gemini CLI 0.37.0.
 - **Gemini `--approval-mode`** — New in 0.37.0: `default`, `auto_edit`, `yolo`, `plan`. Could use in hooks for safer non-interactive mode.
 - **MCP `outputSchema`** — Structured responses via `structuredContent`. SDK supports it but clients may not handle it yet. Deferred.
-- **Extract tool registration loop** — the for-of loop registering tools/prompts from `toolRegistry` is identical across gemini/codex/ollama servers. Could be a shared `registerTools(server, registry)` helper, but llm-mcp has a different pattern so the dedup gain is modest.
+- ~~**Extract tool registration loop**~~ — Done (ADR-053). Shared `registerTools()` + `createSandboxServer()` in `@ask-llm/shared/serverFactory.ts`. ~130 lines eliminated.
 
 ## Completed
 
