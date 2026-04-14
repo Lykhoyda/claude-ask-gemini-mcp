@@ -127,13 +127,13 @@ The **Ask LLM plugin** adds multi-provider code review, brainstorming, and autom
 ### What You Get
 
 | Feature | Description |
-|---------|-------------|
-| `/multi-review` | Parallel Gemini + Codex review with 4-phase validation pipeline and consensus highlighting |
-| `/gemini-review` | Gemini-only review with confidence filtering |
-| `/codex-review` | Codex-only review with confidence filtering |
-| `/ollama-review` | Local review — no data leaves your machine |
-| `/brainstorm` | Multi-LLM brainstorm: Claude Opus researches the topic against real files in parallel with external providers (Gemini/Codex/Ollama), then synthesizes all findings with verified findings weighted higher |
-| **Pre-commit hook** | Reviews staged changes before `git commit`, warns about critical issues |
+|:---|:---|
+| <nobr>`/multi-review`</nobr> | Parallel Gemini + Codex review with 4-phase validation pipeline and consensus highlighting |
+| <nobr>`/gemini-review`</nobr> | Gemini-only review with confidence filtering |
+| <nobr>`/codex-review`</nobr> | Codex-only review with confidence filtering |
+| <nobr>`/ollama-review`</nobr> | Local review — no data leaves your machine |
+| <nobr>`/brainstorm`</nobr> | Multi-LLM brainstorm: Claude Opus researches the topic against real files in parallel with external providers (Gemini/Codex/Ollama), then synthesizes all findings with verified findings weighted higher |
+| <nobr>**Pre-commit hook**</nobr> | Reviews staged changes before `git commit`, warns about critical issues |
 
 The review agents use a 4-phase pipeline inspired by [Anthropic's code-review plugin](https://github.com/anthropics/claude-code/tree/main/plugins/code-review): context gathering, prompt construction with explicit false-positive exclusions, synthesis, and source-level validation of each finding.
 
