@@ -25,19 +25,25 @@ npm install -g ask-codex-mcp
 
 | Tool | Purpose |
 |------|---------|
-| `ask-codex` | Send prompts to Codex CLI. Defaults to GPT-5.4 with automatic mini fallback |
+| `ask-codex` | Send prompts to Codex CLI. Optional `sessionId` for multi-turn — maps to Codex's native `thread_id` and uses `codex exec resume <id>` under the hood ([ADR-058](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) |
+| `get-usage-stats` | Per-session token totals + breakdowns. In-memory ([ADR-054](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) |
 | `ping` | Fast connection test to verify MCP setup |
+
+`ask-codex` returns both human-readable text and a structured `AskResponse` (provider, response, model, sessionId, usage) via MCP `outputSchema`. The Thread ID returned in the response footer is the same value as `structuredContent.sessionId` — pass it back as `sessionId` to continue the conversation.
 
 ## Models
 
 - **Default:** `gpt-5.4` (highest capability)
-- **Fallback:** `gpt-5.4-mini` (automatic on quota errors)
+- **Fallback:** `gpt-5.4-mini` (automatic on quota errors per [ADR-028](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md))
 
 ## Key Features
 
 - **GPT-5.4 access** via the official Codex CLI
-- **JSONL output parsing** for structured responses
+- **Native session continuity** — `sessionId` parameter maps to Codex's `thread_id`; `codex exec resume <id>` is used internally for follow-up turns (zero replay cost — Codex retains state)
+- **`--full-auto` flag** so Codex never hangs waiting for approval prompts in MCP subprocess context ([ADR-046](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md))
+- **JSONL output parsing** for structured responses + token usage
 - **Automatic quota fallback** from GPT-5.4 to mini
+- **Structured AskResponse** via outputSchema for programmatic clients
 - **Standard MCP transport** works with 40+ clients
 
 ## npm

@@ -30,23 +30,27 @@ gemini login
 
 | Tool | Purpose |
 |------|---------|
-| `ask-gemini` | Send prompts to Gemini CLI with `@` file syntax. Supports sandbox mode and multi-turn sessions |
-| `ask-gemini-edit` | Structured code edits via Gemini changeMode. Returns OLD/NEW edit blocks |
+| `ask-gemini` | Send prompts to Gemini CLI with `@` file syntax. Optional `sessionId` for multi-turn; live progressive output via `--output-format stream-json` ([ADR-057](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) |
+| `ask-gemini-edit` | Structured code edits via Gemini changeMode. Returns OLD/NEW edit blocks. Supports `includeDirs` for monorepo context |
 | `fetch-chunk` | Retrieve subsequent chunks from cached large responses |
+| `get-usage-stats` | Per-session token totals + breakdowns by provider/model. In-memory ([ADR-054](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) |
 | `ping` | Fast connection test to verify MCP setup |
+
+`ask-gemini` returns both human-readable text and a structured `AskResponse` (provider, response, model, sessionId, usage) via MCP `outputSchema` — programmatic clients can extract the sessionId and usage fields directly without parsing the response footer ([ADR-065](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)).
 
 ## Models
 
 - **Default:** `gemini-3.1-pro-preview` (latest, highest capability)
-- **Fallback:** `gemini-3-flash-preview` (automatic on quota errors)
+- **Fallback:** `gemini-3-flash-preview` (automatic on quota errors per [ADR-044](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md))
 
 ## Key Features
 
 - **1M+ token context** for analyzing entire codebases
-- **Multi-turn sessions** via `sessionId` for conversation continuity
-- **Include directories** for monorepo context (`includeDirs` parameter)
-- **Sandbox mode** for safe code execution
-- **Automatic quota fallback** from Pro to Flash
+- **Multi-turn sessions** via `sessionId` — native `--resume <id>` (zero replay cost)
+- **Include directories** for monorepo context (`includeDirs` parameter on `ask-gemini-edit`)
+- **Live progressive output** — assistant message deltas stream to MCP progress notifications, no frozen waits on long calls
+- **Structured AskResponse** via outputSchema for programmatic clients
+- **Automatic quota fallback** from Pro to Flash on `RESOURCE_EXHAUSTED`
 
 ## npm
 
