@@ -1,5 +1,5 @@
 ---
-description: Slash commands for AI code review and brainstorming — /gemini-review, /codex-review, /ollama-review, /multi-review, and /brainstorm.
+description: Slash commands for AI code review, brainstorming, and side-by-side multi-provider comparison — /gemini-review, /codex-review, /ollama-review, /multi-review (with verification), /brainstorm, /brainstorm-all, and /compare.
 ---
 
 # Skills
@@ -82,3 +82,40 @@ Shortcut for `/brainstorm gemini,codex,ollama <topic>`. Sends to all three exter
 ```
 
 Requires Ollama running locally since it includes the local provider.
+
+## Multi-Provider Review Skills
+
+### `/multi-review`
+
+Run independent code reviews from Gemini and Codex in parallel, **verify** each finding against the source, then present combined consensus / unique / rejected findings.
+
+```text
+/multi-review
+```
+
+Pipeline:
+
+1. **Gather and prepare the diff** — `git status` first; `git add -N` for untracked files; pathspec exclusion of docs/binaries (`:!docs/` `:!*.md` `:!yarn.lock` `:!*.png`); 3-tier size policy (`<50KB` send as-is, `50–150KB` warn about expected wall time, `>150KB` ask before sending).
+2. **Dispatch with fallback** — preferred path is the `gemini-reviewer` and `codex-reviewer` agents in parallel; falls back to direct Bash dispatch via the plugin's `dist/run.js` and `dist/codex-run.js` runners using the [ADR-050](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md) dispatch pattern when agents are unavailable.
+3. **Verify each finding** — for every finding above 80/100 confidence, Read the file at the cited line and check whether the claim is actually true. Classifies as **VERIFIED** (claim holds), **REJECTED** (false positive), or **UNVERIFIABLE** (cannot confirm without runtime). This step exists specifically because confidence scores aren't an oracle — see [ADR-064](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md).
+4. **Resilient failure handling** — when a provider fails (timeout, exit ≠ 0, 0-byte output), surface the failure inline with stderr instead of silently dropping. Partial results are explicit.
+5. **Synthesis** — combined output with `Verified by both`, `Verified by Gemini only`, `Verified by Codex only`, `Rejected (false positives)`, `Unverifiable`, and per-provider stats including verification counts.
+
+The verification step protects against the failure mode where one provider returns a high-confidence claim that's contradicted by the actual source — caught and rejected before reaching the user.
+
+### `/compare`
+
+Side-by-side raw responses from multiple providers. **No synthesis**, no consensus extraction, no validation pipeline — just verbatim outputs so you can compare directly.
+
+```text
+/compare what's the difference between Server-Sent Events and WebSockets?
+/compare gemini and codex review @src/auth.ts
+```
+
+Use when:
+- You want to see how each provider phrases the same answer (style, depth, confidence framing)
+- You want a sanity check before picking one provider's recommendation
+- You explicitly want to AVOID Claude synthesizing or weighting the responses
+
+If you want consensus extraction → use `/brainstorm` instead.
+If you're reviewing a code diff → use `/multi-review` instead.

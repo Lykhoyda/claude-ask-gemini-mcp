@@ -152,12 +152,18 @@ See the [plugin docs](https://lykhoyda.github.io/ask-llm/plugin/overview) for de
 
 | Tool | Package | Purpose |
 |------|---------|---------|
-| `ask-gemini` | ask-gemini-mcp | Send prompts to Gemini CLI with `@` file syntax. 1M+ token context |
+| `ask-gemini` | ask-gemini-mcp | Send prompts to Gemini CLI with `@` file syntax. 1M+ token context. Live progressive output via `stream-json` |
 | `ask-gemini-edit` | ask-gemini-mcp | Get structured OLD/NEW code edit blocks from Gemini |
 | `fetch-chunk` | ask-gemini-mcp | Retrieve chunks from cached large responses |
-| `ask-codex` | ask-codex-mcp | Send prompts to Codex CLI. GPT-5.4 with mini fallback |
-| `ask-ollama` | ask-ollama-mcp | Send prompts to local Ollama. Fully private, zero cost |
+| `ask-codex` | ask-codex-mcp | Send prompts to Codex CLI. GPT-5.4 with mini fallback. Native session resume via `sessionId` |
+| `ask-ollama` | ask-ollama-mcp | Send prompts to local Ollama. Fully private, zero cost. Server-side conversation replay via `sessionId` |
+| `ask-llm` | ask-llm-mcp | Unified orchestrator — pick provider per call. Fan out to all installed providers |
+| `multi-llm` | ask-llm-mcp | Dispatch the same prompt to multiple providers in parallel; returns per-provider responses + usage in one call |
+| `get-usage-stats` | all | Per-session token totals, fallback counts, breakdowns by provider/model — all in-memory, no persistence |
+| `diagnose` | ask-llm-mcp | Self-diagnosis: Node version, PATH resolution, provider CLI presence + versions. Read-only |
 | `ping` | all | Connection test — verify MCP setup |
+
+All `ask-*` tools accept an optional `sessionId` parameter for multi-turn conversations and now return a structured `AskResponse` (provider, response, model, sessionId, usage) via MCP `outputSchema` alongside the human-readable text. The orchestrator (`ask-llm-mcp`) also exposes `usage://current-session` as an MCP Resource for live JSON snapshots.
 
 ### Usage Examples
 
@@ -166,7 +172,23 @@ ask gemini to review the changes in @src/auth.ts for security issues
 ask codex to suggest a better algorithm for @src/sort.ts
 ask ollama to explain @src/config.ts (runs locally, no data sent anywhere)
 use gemini to summarize @. the current directory
+use multi-llm to compare what gemini and codex think about this approach
 ```
+
+## CLI Subcommands
+
+The orchestrator binary (`ask-llm-mcp`) supports two CLI modes alongside the default MCP server:
+
+```bash
+# Interactive multi-provider REPL — switch providers, persist sessions, see usage live
+npx ask-llm-mcp repl
+
+# Diagnose your setup — Node version, PATH, provider CLI versions, env vars
+npx ask-llm-mcp doctor          # human-readable
+npx ask-llm-mcp doctor --json   # machine-readable, exit 1 on error
+```
+
+The REPL ships sessions per provider (`/provider gemini`, `/provider codex`, `/new`, `/sessions`, `/usage`) and inherits all the executor behavior (quota fallback, stream-json output for Gemini, native session resume).
 
 ## Models
 

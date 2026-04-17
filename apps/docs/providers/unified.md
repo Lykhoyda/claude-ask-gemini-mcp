@@ -37,20 +37,34 @@ On startup, the unified server:
 
 All tools from installed providers are registered. If you have all three:
 
-| Tool | Provider | Purpose |
-|------|----------|---------|
-| `ask-gemini` | Gemini | Prompts via Gemini CLI |
-| `ask-gemini-edit` | Gemini | Structured code edits |
-| `fetch-chunk` | Gemini | Large response chunks |
-| `ask-codex` | Codex | Prompts via Codex CLI |
-| `ask-ollama` | Ollama | Prompts via local Ollama |
-| `ping` | All | Connection test per provider |
+| Tool | Purpose |
+|------|---------|
+| `ask-llm` | Single unified tool — picks the provider via `provider` parameter (`gemini`, `codex`, `ollama`). Optional `sessionId` for multi-turn continuation |
+| `multi-llm` | Dispatch the same prompt to multiple providers in parallel; returns per-provider responses + usage in one call |
+| `get-usage-stats` | Per-session token totals + breakdowns by provider/model — in-memory, no persistence |
+| `diagnose` | Self-diagnosis: Node version, PATH, provider CLI presence + versions. Read-only |
+| `ping` | Connection test |
+
+The orchestrator uses a single `ask-llm` tool (not one per provider) for token efficiency — see [ADR-029](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md). All `ask-*` tools return both human-readable text and a structured `AskResponse` (provider, response, model, sessionId, usage) via MCP `outputSchema`.
+
+It also exposes `usage://current-session` as an MCP Resource for live JSON snapshots of token spend.
+
+## CLI Subcommands
+
+The `ask-llm-mcp` binary supports two CLI modes alongside the default MCP server:
+
+```bash
+npx ask-llm-mcp repl     # interactive multi-provider REPL with sessions, usage tracking, slash commands
+npx ask-llm-mcp doctor   # diagnose Node version, PATH, provider CLIs, env vars (--json for machine output)
+```
 
 ## Key Features
 
 - **Single server** for all providers
 - **Auto-detection** of installed CLIs
-- **Dynamic tool registration** based on availability
+- **Single unified `ask-llm` tool** for token efficiency
+- **Multi-provider parallel dispatch** via `multi-llm` (Promise.all internally; per-provider failure isolation)
+- **Session continuity** across all 3 providers — Gemini (`--resume`), Codex (`exec resume`), Ollama (server-side replay)
 - **Graceful degradation** if a provider is unavailable
 
 ## npm
