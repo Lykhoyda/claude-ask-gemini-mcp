@@ -34,6 +34,20 @@
 <span class="line"><span class="comment"># User scope (all projects)</span></span>
 <span class="line"><span>claude mcp add --scope user {{ cfg.serverName }} -- npx -y {{ cfg.pkg }}</span></span></code></pre>
               </div>
+
+              <p class="config-hint plugin-hint">
+                Or install as a plugin (adds slash commands like
+                <code>/multi-review</code>, <code>/brainstorm</code>,
+                <code>/compare</code>, plus reviewer subagents and a pre-commit hook):
+              </p>
+              <div class="language-bash">
+                <button title="Copy Code" class="copy"></button>
+                <span class="lang">bash</span>
+                <pre
+                  class="shiki"
+                ><code><span class="line"><span>/plugin marketplace add Lykhoyda/ask-llm</span></span>
+<span class="line"><span>/plugin install ask-llm@ask-llm-plugins</span></span></code></pre>
+              </div>
             </div>
           </div>
           <div
@@ -332,6 +346,12 @@ const tabs = [
   font-size: 14px;
   color: var(--color-text-secondary);
   margin: 0 0 16px;
+}
+
+.config-hint.plugin-hint {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--color-bg-border-subtle);
 }
 
 .config-hint code {
