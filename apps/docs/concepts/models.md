@@ -11,7 +11,7 @@ Each provider auto-selects a sensible default model with automatic fallback to a
 | Provider | Default | Fallback | Trigger |
 |---|---|---|---|
 | Gemini | `gemini-3.1-pro-preview` | `gemini-3-flash-preview` | `RESOURCE_EXHAUSTED` quota error or "exhausted your capacity" pattern ([ADR-044](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) |
-| Codex | `gpt-5.4` | `gpt-5.4-mini` | Quota errors (`rate_limit_exceeded`, `429`, `insufficient_quota`) ([ADR-028](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) |
+| Codex | `gpt-5.5` | `gpt-5.5-mini` | Quota errors (`rate_limit_exceeded`, `429`, `insufficient_quota`) ([ADR-028](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md), bumped per [ADR-067](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) |
 | Ollama | `qwen2.5-coder:7b` | `qwen2.5-coder:1.5b` | Model-not-found error (e.g., 7b not pulled but 1.5b is) |
 
 The fallback fires automatically inside the executor — your client sees a successful response with `usage.fellBack: true` in the structured output, and a `[Gemini stats: ... fell back]` annotation in the formatted text.
@@ -23,7 +23,7 @@ Different providers excel at different things. Pick by what you're doing, not by
 | Task | Suggested provider | Why |
 |---|---|---|
 | Whole-codebase review | **Gemini** | 1M+ token context fits things others can't |
-| Targeted code reasoning, refactor critique | **Codex** | GPT-5.4's strength is dense code reasoning at moderate context size |
+| Targeted code reasoning, refactor critique | **Codex** | GPT-5.5's strength is dense code reasoning at moderate context size |
 | Private / air-gapped analysis | **Ollama** | Runs locally, nothing leaves your machine |
 | "What do they all think?" comparison | **Multi-LLM** (`multi-llm` tool or `/compare` skill) | Parallel dispatch, see all responses side-by-side |
 | Code review with verified findings | **`/multi-review` skill** | Gemini + Codex in parallel, then verifies each finding against source |
@@ -45,7 +45,7 @@ Or programmatically:
 For Codex, common overrides:
 
 ```text
-Use ask-codex with model gpt-5.4-mini to summarize this commit
+Use ask-codex with model gpt-5.5-mini to summarize this commit
 ```
 
 For Ollama, you can request any model you've pulled:
@@ -64,8 +64,8 @@ Use ask-ollama with model deepseek-coder:6.7b to review this implementation
 |---|---|---|
 | Gemini Pro | ~1M tokens (~250k LOC) | Free tier via OAuth, paid tiers via API key |
 | Gemini Flash | ~1M tokens | Cheaper than Pro; fallback target for quota relief |
-| Codex GPT-5.4 | Per OpenAI's published context window | Per OpenAI billing |
-| Codex GPT-5.4-mini | Smaller context | Cheaper; fallback target |
+| Codex GPT-5.5 | Per OpenAI's published context window | Per OpenAI billing |
+| Codex GPT-5.5-mini | Smaller context | Cheaper; fallback target |
 | Ollama | Per model (e.g., 32k for qwen2.5-coder) | Free — runs locally |
 
 ## Track What You're Spending
@@ -82,6 +82,6 @@ This is in-memory only — no persistence to disk, resets when the MCP server re
 
 - **General code review** → defaults are correct; let the fallback chain handle quota
 - **Whole-codebase analysis** → `ask-gemini` (Pro) — Flash auto-kicks in if Pro is exhausted
-- **Quick fixes, fast iteration** → request Flash or `gpt-5.4-mini` explicitly to skip the Pro→fallback round-trip
+- **Quick fixes, fast iteration** → request Flash or `gpt-5.5-mini` explicitly to skip the Pro→fallback round-trip
 - **Privacy-sensitive code** → `ask-ollama`, never leaves your machine
 - **Multi-perspective debate** → `multi-llm` or `/brainstorm` skill — Claude weighs verified vs inferred

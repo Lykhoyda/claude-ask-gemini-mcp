@@ -33,12 +33,12 @@ npm install -g ask-codex-mcp
 
 ## Models
 
-- **Default:** `gpt-5.4` (highest capability)
-- **Fallback:** `gpt-5.4-mini` (automatic on quota errors per [ADR-028](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md))
+- **Default:** `gpt-5.5` (highest capability)
+- **Fallback:** `gpt-5.5-mini` (automatic on quota errors per [ADR-028](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md), model bumped in [ADR-067](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md))
 
 ## Key Features
 
-- **GPT-5.4 access** via the official Codex CLI
+- **GPT-5.5 access** via the official Codex CLI
 - **Native session continuity** — `sessionId` parameter maps to Codex's `thread_id`; `codex exec resume <id>` is used internally for follow-up turns (zero replay cost — Codex retains state)
 - **`--full-auto` flag** so Codex never hangs waiting for approval prompts in MCP subprocess context ([ADR-046](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md))
 - **JSONL output parsing** for structured responses + token usage

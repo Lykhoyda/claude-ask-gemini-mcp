@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MODELS } from "../constants.js";
 import { toolRegistry } from "../tools/index.js";
 
 describe("MCP server smoke test", () => {
@@ -20,4 +21,16 @@ describe("MCP server smoke test", () => {
       expect(typeof tool?.execute).toBe("function");
     });
   }
+});
+
+describe("Codex default model version (ADR-067)", () => {
+  it("defaults to gpt-5.5 when ASK_CODEX_MODEL is not set", () => {
+    if (process.env.ASK_CODEX_MODEL) return;
+    expect(MODELS.DEFAULT).toBe("gpt-5.5");
+  });
+
+  it("falls back to gpt-5.5-mini when ASK_CODEX_FALLBACK_MODEL is not set", () => {
+    if (process.env.ASK_CODEX_FALLBACK_MODEL) return;
+    expect(MODELS.FALLBACK).toBe("gpt-5.5-mini");
+  });
 });

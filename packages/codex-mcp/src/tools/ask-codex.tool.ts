@@ -26,7 +26,7 @@ const askCodexArgsSchema = z.object({
 export const askCodexTool: UnifiedTool = {
   name: "ask-codex",
   description:
-    "Send a prompt to OpenAI Codex CLI (defaults to gpt-5.4 with automatic fallback on quota errors). Use for code review, second opinions, analysis, and AI-to-AI collaboration. Do not override the model parameter unless the user explicitly asks. Returns both human-readable text and a structured response (provider, model, sessionId, usage) via outputSchema. The returned sessionId field maps to Codex's thread_id and can be passed back as sessionId to continue the conversation.",
+    "Send a prompt to OpenAI Codex CLI (defaults to gpt-5.5 with automatic fallback on quota errors). Use for code review, second opinions, analysis, and AI-to-AI collaboration. Do not override the model parameter unless the user explicitly asks. Returns both human-readable text and a structured response (provider, model, sessionId, usage) via outputSchema. The returned sessionId field maps to Codex's thread_id and can be passed back as sessionId to continue the conversation.",
   zodSchema: askCodexArgsSchema,
   outputSchema: askResponseSchema,
   annotations: {

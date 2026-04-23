@@ -26,7 +26,7 @@
 ## Priority 8: Multi-LLM Support (ask-llm-mcp) — ADR-020, ADR-026
 - [x] **Phase 1: Monorepo restructure** — yarn workspaces, packages/shared + packages/gemini-mcp + packages/plugin (ADR-026)
 - [x] **Phase 2: Plugin providers** — Gemini + Codex in packages/claude-plugin: ask-codex-run binary, codex-reviewer agent, /codex-review skill (ADR-031)
-- [x] **Phase 3: Codex MCP** — packages/codex-mcp/ (`ask-codex-mcp`), codexExecutor with JSONL parsing, gpt-5.4 default with gpt-5.4-mini fallback on quota errors (ADR-028)
+- [x] **Phase 3: Codex MCP** — packages/codex-mcp/ (`ask-codex-mcp`), codexExecutor with JSONL parsing, gpt-5.5 default with gpt-5.5-mini fallback on quota errors (ADR-028; default bumped from 5.4→5.5 in ADR-067)
 - [x] **Phase 4: Orchestrator** — packages/llm-mcp/ (`ask-llm-mcp`), dynamic provider import via `./register` subpath, `isCommandAvailable()` gating, tool dedup, startup logging (ADR-029)
 - [x] **Phase 5: Ollama** — packages/ollama-mcp/ (`ask-ollama-mcp`), HTTP executor via native fetch against POST /api/chat, qwen2.5-coder:7b default with 1.5b fallback, OLLAMA_HOST env var, /api/tags availability probe (ADR-032)
 - [x] **Local smoke tests** — Husky pre-push hook runs integration tests using locally installed CLIs (ADR-043). Replaced weekly GA workflow with per-push local testing via `scripts/smoke-test.sh`

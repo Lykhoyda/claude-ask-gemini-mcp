@@ -195,7 +195,7 @@ The REPL ships sessions per provider (`/provider gemini`, `/provider codex`, `/n
 | Provider | Default | Fallback |
 |----------|---------|----------|
 | Gemini | `gemini-3.1-pro-preview` | `gemini-3-flash-preview` (on quota) |
-| Codex | `gpt-5.4` | `gpt-5.4-mini` (on quota) |
+| Codex | `gpt-5.5` | `gpt-5.5-mini` (on quota) |
 | Ollama | `qwen2.5-coder:7b` | `qwen2.5-coder:1.5b` (if not found) |
 
 All providers automatically fall back to a lighter model on errors.

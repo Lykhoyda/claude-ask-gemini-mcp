@@ -62,8 +62,8 @@ Add to `claude_desktop_config.json`:
 
 | Model | Use Case |
 |-------|----------|
-| `gpt-5.4` | Default — highest capability |
-| `gpt-5.4-mini` | Automatic fallback on quota errors |
+| `gpt-5.5` | Default — highest capability |
+| `gpt-5.5-mini` | Automatic fallback on quota errors |
 
 ## Documentation
 

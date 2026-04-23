@@ -21,7 +21,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     command: "codex",
     executorModule: "ask-codex-mcp/executor",
     executorFn: "executeCodexCLI",
-    defaultModel: "gpt-5.4",
+    defaultModel: "gpt-5.5",
   },
   ollama: {
     name: "Ollama",

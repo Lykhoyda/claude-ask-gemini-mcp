@@ -13,8 +13,8 @@ export const STATUS_MESSAGES = {
 } as const;
 
 export const MODELS = {
-  DEFAULT: process.env.ASK_CODEX_MODEL || "gpt-5.4",
-  FALLBACK: process.env.ASK_CODEX_FALLBACK_MODEL || "gpt-5.4-mini",
+  DEFAULT: process.env.ASK_CODEX_MODEL || "gpt-5.5",
+  FALLBACK: process.env.ASK_CODEX_FALLBACK_MODEL || "gpt-5.5-mini",
 };
 
 export const CLI = {
