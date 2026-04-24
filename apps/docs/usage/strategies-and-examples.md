@@ -152,5 +152,5 @@ Ollama runs entirely locally, never makes a network call to a third party. The M
 3. **Let the defaults work.** Each provider auto-falls back to a lighter model on quota errors — you don't usually need to override the model parameter.
 4. **Use `multi-llm` or `/compare` when you want raw multiple perspectives.** Use `/multi-review` when you want verified findings (catches false positives).
 5. **Use sessions for iteration**, not for one-shot questions. The cost overhead isn't worth it if you won't follow up.
-6. **Check `/usage` periodically** in the REPL or call `get-usage-stats` to see what you're spending — both Gemini Pro and Codex GPT-5.4 can rack up tokens fast on large prompts.
+6. **Check `/usage` periodically** in the REPL or call `get-usage-stats` to see what you're spending — both Gemini Pro and Codex GPT-5.5 can rack up tokens fast on large prompts.
 7. **Run `npx ask-llm-mcp doctor`** when something doesn't work before opening an issue. It catches 90%+ of setup problems with a clear diagnostic line per check.

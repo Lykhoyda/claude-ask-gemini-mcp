@@ -10,7 +10,7 @@
 
 </div>
 
-An [MCP](https://modelcontextprotocol.io/) server for AI-to-AI collaboration via the Codex CLI. Works with Claude Code, Claude Desktop, Cursor, Warp, Copilot, and [40+ other MCP clients](https://modelcontextprotocol.io/clients). Access GPT-5.4 for code generation, analysis, and review with automatic fallback to GPT-5.4-mini on quota limits.
+An [MCP](https://modelcontextprotocol.io/) server for AI-to-AI collaboration via the Codex CLI. Works with Claude Code, Claude Desktop, Cursor, Warp, Copilot, and [40+ other MCP clients](https://modelcontextprotocol.io/clients). Access GPT-5.5 for code generation, analysis, and review with automatic fallback to GPT-5.5-mini on quota limits.
 
 Part of the [Ask LLM](https://github.com/Lykhoyda/ask-llm) monorepo.
 
@@ -55,7 +55,7 @@ Add to `claude_desktop_config.json`:
 
 | Tool | Purpose |
 |------|---------|
-| `ask-codex` | Send prompts to Codex CLI. Defaults to GPT-5.4 with automatic mini fallback |
+| `ask-codex` | Send prompts to Codex CLI. Defaults to GPT-5.5 with automatic mini fallback |
 | `ping` | Connection test — verify MCP setup without using tokens |
 
 ## Models

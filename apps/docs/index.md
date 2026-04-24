@@ -39,7 +39,7 @@ hero:
   </a>
   <a href="/ask-llm/providers/codex" class="provider-card" data-provider="codex">
     <span class="provider-name">Codex</span>
-    <span class="provider-desc">OpenAI's Codex CLI. GPT-5.4 with automatic mini fallback on quota.</span>
+    <span class="provider-desc">OpenAI's Codex CLI. GPT-5.5 with automatic mini fallback on quota.</span>
     <span class="provider-pkg">npx ask-codex-mcp</span>
   </a>
   <a href="/ask-llm/providers/ollama" class="provider-card" data-provider="ollama">

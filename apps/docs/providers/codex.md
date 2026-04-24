@@ -1,10 +1,10 @@
 ---
-description: Bridge Claude with OpenAI Codex CLI for GPT-5.4 code review and analysis. Automatic fallback to GPT-5.4-mini on quota limits.
+description: Bridge Claude with OpenAI Codex CLI for GPT-5.5 code review and analysis. Automatic fallback to GPT-5.5-mini on quota limits.
 ---
 
 # Codex
 
-Bridge Claude with OpenAI's Codex CLI. Access GPT-5.4 for code generation, analysis, and review with automatic fallback to GPT-5.4-mini on quota limits.
+Bridge Claude with OpenAI's Codex CLI. Access GPT-5.5 for code generation, analysis, and review with automatic fallback to GPT-5.5-mini on quota limits.
 
 ## Installation
 
@@ -42,7 +42,7 @@ npm install -g ask-codex-mcp
 - **Native session continuity** — `sessionId` parameter maps to Codex's `thread_id`; `codex exec resume <id>` is used internally for follow-up turns (zero replay cost — Codex retains state)
 - **`--full-auto` flag** so Codex never hangs waiting for approval prompts in MCP subprocess context ([ADR-046](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md))
 - **JSONL output parsing** for structured responses + token usage
-- **Automatic quota fallback** from GPT-5.4 to mini
+- **Automatic quota fallback** from GPT-5.5 to mini
 - **Structured AskResponse** via outputSchema for programmatic clients
 - **Standard MCP transport** works with 40+ clients
 

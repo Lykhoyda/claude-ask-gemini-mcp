@@ -46,7 +46,7 @@ This gives you `gemini:ask-gemini` rather than `plugin:ask-llm:gemini:ask-gemini
 |---------|----------|-------------|
 | `/multi-review` | Gemini + Codex | Parallel review with 4-phase validation pipeline and consensus highlighting |
 | `/gemini-review` | Gemini | Get a second opinion on your current changes |
-| `/codex-review` | Codex | Get a second opinion from GPT-5.4 |
+| `/codex-review` | Codex | Get a second opinion from GPT-5.5 |
 | `/ollama-review` | Ollama | Local review — no data leaves your machine |
 | `/brainstorm` | Multi + Claude Opus | Claude Opus researches the topic against real files in parallel with external providers, then synthesizes findings |
 | `/brainstorm-all` | All + Claude Opus | Brainstorm with all three external providers plus Claude Opus research |

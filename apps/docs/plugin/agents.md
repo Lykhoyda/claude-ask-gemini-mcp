@@ -31,7 +31,7 @@ Sends code changes to Google Gemini for review. Leverages Gemini's massive conte
 
 ### `codex-reviewer`
 
-Sends code changes to OpenAI Codex (GPT-5.4) for review. Automatic fallback to GPT-5.4-mini on quota limits.
+Sends code changes to OpenAI Codex (GPT-5.5) for review. Automatic fallback to GPT-5.5-mini on quota limits.
 
 ### `ollama-reviewer`
 

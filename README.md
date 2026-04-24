@@ -18,7 +18,7 @@
 
 </div>
 
-MCP servers that bridge your AI client with multiple LLM providers for AI-to-AI collaboration. Works with Claude Code, Claude Desktop, Cursor, Warp, Copilot, and [40+ other MCP clients](https://modelcontextprotocol.io/clients). Leverage Gemini's 1M+ token context, Codex's GPT-5.4, or local Ollama models — all via standard [MCP](https://modelcontextprotocol.io/).
+MCP servers that bridge your AI client with multiple LLM providers for AI-to-AI collaboration. Works with Claude Code, Claude Desktop, Cursor, Warp, Copilot, and [40+ other MCP clients](https://modelcontextprotocol.io/clients). Leverage Gemini's 1M+ token context, Codex's GPT-5.5, or local Ollama models — all via standard [MCP](https://modelcontextprotocol.io/).
 
 ## Why?
 
@@ -155,7 +155,7 @@ See the [plugin docs](https://lykhoyda.github.io/ask-llm/plugin/overview) for de
 | `ask-gemini` | ask-gemini-mcp | Send prompts to Gemini CLI with `@` file syntax. 1M+ token context. Live progressive output via `stream-json` |
 | `ask-gemini-edit` | ask-gemini-mcp | Get structured OLD/NEW code edit blocks from Gemini |
 | `fetch-chunk` | ask-gemini-mcp | Retrieve chunks from cached large responses |
-| `ask-codex` | ask-codex-mcp | Send prompts to Codex CLI. GPT-5.4 with mini fallback. Native session resume via `sessionId` |
+| `ask-codex` | ask-codex-mcp | Send prompts to Codex CLI. GPT-5.5 with mini fallback. Native session resume via `sessionId` |
 | `ask-ollama` | ask-ollama-mcp | Send prompts to local Ollama. Fully private, zero cost. Server-side conversation replay via `sessionId` |
 | `ask-llm` | ask-llm-mcp | Unified orchestrator — pick provider per call. Fan out to all installed providers |
 | `multi-llm` | ask-llm-mcp | Dispatch the same prompt to multiple providers in parallel; returns per-provider responses + usage in one call |

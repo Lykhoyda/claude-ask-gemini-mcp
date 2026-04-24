@@ -30,13 +30,13 @@ Uses Gemini's 1M+ token context window, making it ideal for reviewing changes th
 
 ### `/codex-review`
 
-Get a second opinion from OpenAI Codex (GPT-5.4) on your current changes.
+Get a second opinion from OpenAI Codex (GPT-5.5) on your current changes.
 
 ```text
 /codex-review
 ```
 
-Falls back to GPT-5.4-mini automatically if you hit quota limits.
+Falls back to GPT-5.5-mini automatically if you hit quota limits.
 
 ### `/ollama-review`
 

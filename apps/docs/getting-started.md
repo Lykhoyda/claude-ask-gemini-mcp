@@ -13,7 +13,7 @@ Three steps: install Node, install at least one provider, register the MCP serve
 
 ::: tip Which provider should I install first?
 - **Gemini** — best for huge-context analysis (1M+ tokens). Great for whole-codebase reviews. Free tier via OAuth.
-- **Codex** — strong at code reasoning (GPT-5.4). Good for targeted fixes and architecture critique.
+- **Codex** — strong at code reasoning (GPT-5.5). Good for targeted fixes and architecture critique.
 - **Ollama** — local, private, zero-cost. Good when data can't leave your machine.
 :::
 

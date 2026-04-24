@@ -78,4 +78,4 @@ Multi-provider shell with `/provider <name>`, `/new`, `/usage`, `/sessions`, `/h
 - [Strategies & Examples](/usage/strategies-and-examples) — proven workflows for code review, debugging, and architecture analysis
 - [Multi-Turn Sessions](/usage/multi-turn-sessions) — continue conversations across calls
 - [Plugin Overview](/plugin/overview) — slash commands and subagents for Claude Code users
-- [Model Selection](/concepts/models) — Pro vs Flash, GPT-5.4 vs mini, Ollama model choices
+- [Model Selection](/concepts/models) — Pro vs Flash, GPT-5.5 vs mini, Ollama model choices
