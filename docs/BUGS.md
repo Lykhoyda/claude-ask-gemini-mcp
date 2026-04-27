@@ -2,6 +2,12 @@
 
 ## Known Bugs (inherited from upstream)
 
+### ~~Gemini CLI v0.39.1 workspace-trust gate breaks fresh installs~~ FIXED
+- **Severity:** Critical (issue #26)
+- **Affected versions:** Gemini CLI v0.39.1+
+- **Description:** gemini-cli v0.39.1 ([upstream PR #25814](https://github.com/google-gemini/gemini-cli/pull/25814)) added a `FatalUntrustedWorkspaceError` gate that fires before any model call when `gemini -p` is invoked against a directory that was never marked trusted in interactive mode. Fresh installs of `ask-gemini-mcp` against a never-opened directory failed with a raw stderr dump bubbled through `createGeminiStderrHandler` (which only special-cased `RESOURCE_EXHAUSTED`). The catch block at `geminiExecutor.ts:491` would also have triggered a Flash retry against the *same* untrusted directory — guaranteed to fail identically.
+- **Fix:** `geminiExecutor.executeGeminiCLI()` now sets `process.env.GEMINI_TRUST_WORKSPACE = "true"` by default before spawn (forward-compatible env var; older Geminis silently ignore it). Opt-out via `ASK_GEMINI_REQUIRE_WORKSPACE_TRUST=1`. Catch block detects `FatalUntrustedWorkspaceError` / `not running in a trusted directory` patterns and short-circuits with a friendly remediation message (no Flash retry). See ADR-069.
+
 ### ~~Deprecated `-p` flag causes error~~ FIXED
 - **Severity:** Critical
 - **Upstream:** Issue #48, PRs #56, #43

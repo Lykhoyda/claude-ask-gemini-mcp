@@ -34,6 +34,7 @@
 - See [design doc](plans/2026-02-26-ask-llm-mcp-design.md)
 
 ## Priority 9: Bug Fixes (GitHub Issues)
+- [x] **#26 Gemini CLI v0.39.1 workspace-trust gate** — gemini-cli v0.39.1 added `FatalUntrustedWorkspaceError` to headless (`-p`) mode, breaking fresh installs in directories never marked trusted. Fix: `geminiExecutor` sets `GEMINI_TRUST_WORKSPACE=true` by default (forward-compatible env var, ignored on older Geminis); opt-out via `ASK_GEMINI_REQUIRE_WORKSPACE_TRUST=1`. Trust errors short-circuit before the Flash retry (same dir would just fail again) and surface a friendly remediation message. ADR-069
 - [x] **npm 9 EUNSUPPORTEDPROTOCOL workspace:*** — `npx -y ask-llm-mcp` failed under Claude Desktop's Node 18 / npm 9.7.1. Root cause + fix in ADR-052; lifecycle corrected in 1.5.7 / 0.2.7
 - [x] **MCP Registry publish failures** — `server.json` versions were all set to the gemini tag version, causing 404 validation errors for codex/ollama/llm on the MCP registry. Fixed by reading each package's own `package.json` version
 - [x] **Smoke test rate-limit-self-defeating loop** — Pre-push smoke tests burned the very Gemini quota the next push needed, causing intermittent push failures within ~10-minute windows. Added quota-detection escape (`scripts/smoke-test.sh`) that treats 429/quota errors as skip-with-warning, with `FORCE_SMOKE=1` opt-in to restore hard-fail (ADR-051)

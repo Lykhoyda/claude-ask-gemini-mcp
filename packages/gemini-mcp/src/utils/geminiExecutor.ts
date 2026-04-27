@@ -14,7 +14,14 @@ import {
   type UsageStats,
   validateChangeModeEdits,
 } from "@ask-llm/shared";
-import { CLI, MODELS, QUOTA_PATTERNS, STATUS_MESSAGES } from "../constants.js";
+import {
+  CLI,
+  ERROR_MESSAGES,
+  MODELS,
+  QUOTA_PATTERNS,
+  STATUS_MESSAGES,
+  WORKSPACE_TRUST_PATTERNS,
+} from "../constants.js";
 
 interface GeminiModelTokens {
   input?: number;
@@ -378,11 +385,12 @@ function buildArgs(
 
 function createGeminiStderrHandler(): (chunk: string) => void {
   let buffer = "";
-  let logged = false;
+  let quotaLogged = false;
+  let trustLogged = false;
   return (chunk: string) => {
     buffer += chunk;
-    if (!logged && buffer.includes("RESOURCE_EXHAUSTED")) {
-      logged = true;
+    if (!quotaLogged && buffer.includes("RESOURCE_EXHAUSTED")) {
+      quotaLogged = true;
       const modelMatch = buffer.match(/Quota exceeded for quota metric '([^']+)'/);
       const statusMatch = buffer.match(/status["\s]*[:=]\s*(\d+)/);
       const reasonMatch = buffer.match(/"reason":\s*"([^"]+)"/);
@@ -391,10 +399,26 @@ function createGeminiStderrHandler(): (chunk: string) => void {
       const reason = reasonMatch ? reasonMatch[1] : "rateLimitExceeded";
       Logger.error(`Gemini Quota Error: code=${status}, model=${model}, reason=${reason}`);
     }
+    if (!trustLogged && WORKSPACE_TRUST_PATTERNS.some((pattern) => buffer.includes(pattern))) {
+      trustLogged = true;
+      Logger.warn(STATUS_MESSAGES.WORKSPACE_TRUST_DETECTED);
+    }
   };
 }
 
+function ensureWorkspaceTrustEnv(): void {
+  if (process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST === "1") return;
+  if (process.env.GEMINI_TRUST_WORKSPACE !== undefined) return;
+  process.env.GEMINI_TRUST_WORKSPACE = "true";
+}
+
+function isWorkspaceTrustError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return WORKSPACE_TRUST_PATTERNS.some((pattern) => lower.includes(pattern.toLowerCase()));
+}
+
 export async function executeGeminiCLI(options: GeminiExecutorOptions): Promise<GeminiExecutorResult> {
+  ensureWorkspaceTrustEnv();
   const { model, sandbox, changeMode, sessionId, includeDirs, onProgress } = options;
   let promptProcessed = options.prompt;
 
@@ -490,6 +514,9 @@ ${promptProcessed}
     return result;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    if (isWorkspaceTrustError(errorMessage)) {
+      throw new Error(ERROR_MESSAGES.WORKSPACE_TRUST_REQUIRED);
+    }
     const isQuotaError = QUOTA_PATTERNS.some((pattern) => errorMessage.toLowerCase().includes(pattern.toLowerCase()));
     if (isQuotaError && model !== MODELS.FLASH) {
       Logger.warn(`Gemini quota exceeded. Falling back to ${MODELS.FLASH}.`);

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CLI, MODELS } from "../../constants.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CLI, ERROR_MESSAGES, MODELS } from "../../constants.js";
 
 vi.mock("@ask-llm/shared", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@ask-llm/shared")>();
@@ -713,5 +713,87 @@ describe("executeGeminiCLI includeDirs support", () => {
       CLI.FLAGS.PROMPT,
       "hello",
     ]);
+  });
+});
+
+describe("executeGeminiCLI workspace trust handling", () => {
+  let originalTrust: string | undefined;
+  let originalRequireTrust: string | undefined;
+
+  beforeEach(() => {
+    originalTrust = process.env.GEMINI_TRUST_WORKSPACE;
+    originalRequireTrust = process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST;
+    delete process.env.GEMINI_TRUST_WORKSPACE;
+    delete process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST;
+  });
+
+  afterEach(() => {
+    if (originalTrust === undefined) delete process.env.GEMINI_TRUST_WORKSPACE;
+    else process.env.GEMINI_TRUST_WORKSPACE = originalTrust;
+    if (originalRequireTrust === undefined) delete process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST;
+    else process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST = originalRequireTrust;
+  });
+
+  it("sets GEMINI_TRUST_WORKSPACE=true by default", async () => {
+    await executeGeminiCLI({ prompt: "hello" });
+
+    expect(process.env.GEMINI_TRUST_WORKSPACE).toBe("true");
+  });
+
+  it("does not set GEMINI_TRUST_WORKSPACE when ASK_GEMINI_REQUIRE_WORKSPACE_TRUST=1", async () => {
+    process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST = "1";
+
+    await executeGeminiCLI({ prompt: "hello" });
+
+    expect(process.env.GEMINI_TRUST_WORKSPACE).toBeUndefined();
+  });
+
+  it("does not override a user-supplied GEMINI_TRUST_WORKSPACE value", async () => {
+    process.env.GEMINI_TRUST_WORKSPACE = "false";
+
+    await executeGeminiCLI({ prompt: "hello" });
+
+    expect(process.env.GEMINI_TRUST_WORKSPACE).toBe("false");
+  });
+
+  it("throws friendly error and does not fall back to Flash on FatalUntrustedWorkspaceError", async () => {
+    mockExecuteCommand.mockRejectedValueOnce(new Error("FatalUntrustedWorkspaceError: workspace not trusted"));
+
+    await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow(ERROR_MESSAGES.WORKSPACE_TRUST_REQUIRED);
+    expect(mockExecuteCommand).toHaveBeenCalledOnce();
+  });
+
+  it("throws friendly error on the user-visible 'not running in a trusted directory' string", async () => {
+    mockExecuteCommand.mockRejectedValueOnce(new Error("Gemini CLI is not running in a trusted directory."));
+
+    await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow(ERROR_MESSAGES.WORKSPACE_TRUST_REQUIRED);
+    expect(mockExecuteCommand).toHaveBeenCalledOnce();
+  });
+
+  it("does not flag quota errors as trust errors", async () => {
+    mockExecuteCommand
+      .mockRejectedValueOnce(new Error("RESOURCE_EXHAUSTED"))
+      .mockResolvedValueOnce(JSON.stringify({ response: "Flash response" }));
+
+    const result = await executeGeminiCLI({ prompt: "hello" });
+
+    expect(result.response).toContain("Flash response");
+    expect(mockExecuteCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws friendly error when ASK_GEMINI_REQUIRE_WORKSPACE_TRUST=1 and workspace is untrusted", async () => {
+    process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST = "1";
+    mockExecuteCommand.mockRejectedValueOnce(new Error("FatalUntrustedWorkspaceError: workspace not trusted"));
+
+    await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow(ERROR_MESSAGES.WORKSPACE_TRUST_REQUIRED);
+    expect(process.env.GEMINI_TRUST_WORKSPACE).toBeUndefined();
+    expect(mockExecuteCommand).toHaveBeenCalledOnce();
+  });
+
+  it("matches trust patterns case-insensitively (defends against upstream re-formatting)", async () => {
+    mockExecuteCommand.mockRejectedValueOnce(new Error("FATALUNTRUSTEDWORKSPACEERROR: capital edge case"));
+
+    await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow(ERROR_MESSAGES.WORKSPACE_TRUST_REQUIRED);
+    expect(mockExecuteCommand).toHaveBeenCalledOnce();
   });
 });
