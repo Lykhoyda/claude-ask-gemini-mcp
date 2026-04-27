@@ -4,6 +4,7 @@ import { listFiles, listSubdirs, parseMarkdownFrontmatter, readFile } from "./_h
 const expectedSkills = [
   "brainstorm",
   "brainstorm-all",
+  "codex-image",
   "codex-review",
   "compare",
   "gemini-review",
