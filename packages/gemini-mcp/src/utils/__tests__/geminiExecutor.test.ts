@@ -780,4 +780,20 @@ describe("executeGeminiCLI workspace trust handling", () => {
     expect(result.response).toContain("Flash response");
     expect(mockExecuteCommand).toHaveBeenCalledTimes(2);
   });
+
+  it("throws friendly error when ASK_GEMINI_REQUIRE_WORKSPACE_TRUST=1 and workspace is untrusted", async () => {
+    process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST = "1";
+    mockExecuteCommand.mockRejectedValueOnce(new Error("FatalUntrustedWorkspaceError: workspace not trusted"));
+
+    await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow(ERROR_MESSAGES.WORKSPACE_TRUST_REQUIRED);
+    expect(process.env.GEMINI_TRUST_WORKSPACE).toBeUndefined();
+    expect(mockExecuteCommand).toHaveBeenCalledOnce();
+  });
+
+  it("matches trust patterns case-insensitively (defends against upstream re-formatting)", async () => {
+    mockExecuteCommand.mockRejectedValueOnce(new Error("FATALUNTRUSTEDWORKSPACEERROR: capital edge case"));
+
+    await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow(ERROR_MESSAGES.WORKSPACE_TRUST_REQUIRED);
+    expect(mockExecuteCommand).toHaveBeenCalledOnce();
+  });
 });

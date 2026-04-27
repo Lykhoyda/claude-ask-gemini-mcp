@@ -401,7 +401,7 @@ function createGeminiStderrHandler(): (chunk: string) => void {
     }
     if (!trustLogged && WORKSPACE_TRUST_PATTERNS.some((pattern) => buffer.includes(pattern))) {
       trustLogged = true;
-      Logger.error(STATUS_MESSAGES.WORKSPACE_TRUST_DETECTED);
+      Logger.warn(STATUS_MESSAGES.WORKSPACE_TRUST_DETECTED);
     }
   };
 }
@@ -413,7 +413,8 @@ function ensureWorkspaceTrustEnv(): void {
 }
 
 function isWorkspaceTrustError(message: string): boolean {
-  return WORKSPACE_TRUST_PATTERNS.some((pattern) => message.includes(pattern));
+  const lower = message.toLowerCase();
+  return WORKSPACE_TRUST_PATTERNS.some((pattern) => lower.includes(pattern.toLowerCase()));
 }
 
 export async function executeGeminiCLI(options: GeminiExecutorOptions): Promise<GeminiExecutorResult> {
