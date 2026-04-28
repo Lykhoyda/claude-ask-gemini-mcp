@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLI, MODELS } from "../../constants.js";
 
 vi.mock("@ask-llm/shared", async (importOriginal) => {
@@ -324,5 +324,67 @@ describe("executeCodexCLI stdin path for large prompts (#30)", () => {
     expect(fallbackArgs).not.toContain(prompt);
     expect(fallbackArgs).toContain(MODELS.FALLBACK);
     expect(fallbackStdin).toBe(prompt);
+  });
+});
+
+describe("executeCodexCLI ASK_CODEX_LOAD_USER_CONFIG opt-out (#31 follow-up)", () => {
+  let originalLoadUserConfig: string | undefined;
+
+  beforeEach(() => {
+    originalLoadUserConfig = process.env.ASK_CODEX_LOAD_USER_CONFIG;
+    delete process.env.ASK_CODEX_LOAD_USER_CONFIG;
+  });
+
+  afterEach(() => {
+    if (originalLoadUserConfig === undefined) delete process.env.ASK_CODEX_LOAD_USER_CONFIG;
+    else process.env.ASK_CODEX_LOAD_USER_CONFIG = originalLoadUserConfig;
+  });
+
+  it("emits --ignore-user-config + --ignore-rules by default (env unset)", async () => {
+    await executeCodexCLI({ prompt: "hello" });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    expect(args).toContain(CLI.FLAGS.IGNORE_USER_CONFIG);
+    expect(args).toContain(CLI.FLAGS.IGNORE_RULES);
+  });
+
+  it("omits --ignore-user-config + --ignore-rules when ASK_CODEX_LOAD_USER_CONFIG=1", async () => {
+    process.env.ASK_CODEX_LOAD_USER_CONFIG = "1";
+
+    await executeCodexCLI({ prompt: "hello" });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    expect(args).not.toContain(CLI.FLAGS.IGNORE_USER_CONFIG);
+    expect(args).not.toContain(CLI.FLAGS.IGNORE_RULES);
+    expect(args).toEqual([
+      CLI.COMMANDS.EXEC,
+      CLI.FLAGS.SKIP_GIT,
+      CLI.FLAGS.EPHEMERAL,
+      CLI.FLAGS.FULL_AUTO,
+      CLI.FLAGS.JSON,
+      CLI.FLAGS.MODEL,
+      MODELS.DEFAULT,
+      "hello",
+    ]);
+  });
+
+  it("opt-out also applies on session resume", async () => {
+    process.env.ASK_CODEX_LOAD_USER_CONFIG = "1";
+
+    await executeCodexCLI({ prompt: "hello", sessionId: "thread-abc-123" });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    expect(args).not.toContain(CLI.FLAGS.IGNORE_USER_CONFIG);
+    expect(args).not.toContain(CLI.FLAGS.IGNORE_RULES);
+  });
+
+  it("requires literal '1' — other truthy strings keep the deterministic default", async () => {
+    process.env.ASK_CODEX_LOAD_USER_CONFIG = "true";
+
+    await executeCodexCLI({ prompt: "hello" });
+
+    const [, args] = mockExecuteCommand.mock.calls[0];
+    expect(args).toContain(CLI.FLAGS.IGNORE_USER_CONFIG);
+    expect(args).toContain(CLI.FLAGS.IGNORE_RULES);
   });
 });
