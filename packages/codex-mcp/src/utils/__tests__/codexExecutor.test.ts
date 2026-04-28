@@ -53,26 +53,23 @@ describe("executeCodexCLI argument construction", () => {
     ]);
   });
 
-  it("includes --ignore-user-config to skip ~/.codex/config.toml hooks (closes #31)", async () => {
-    await executeCodexCLI({ prompt: "hello" });
-
-    const [, args] = mockExecuteCommand.mock.calls[0];
-    expect(args).toContain("--ignore-user-config");
-  });
-
-  it("includes --ignore-rules to skip user/project execpolicy .rules files", async () => {
-    await executeCodexCLI({ prompt: "hello" });
-
-    const [, args] = mockExecuteCommand.mock.calls[0];
-    expect(args).toContain("--ignore-rules");
-  });
-
-  it("preserves --ignore-user-config + --ignore-rules on session resume", async () => {
+  it("builds correct argv shape on session resume — --ignore-user-config + --ignore-rules preserved (closes #31)", async () => {
     await executeCodexCLI({ prompt: "hello", sessionId: "thread-abc-123" });
 
     const [, args] = mockExecuteCommand.mock.calls[0];
-    expect(args).toContain("--ignore-user-config");
-    expect(args).toContain("--ignore-rules");
+    expect(args).toEqual([
+      CLI.COMMANDS.EXEC,
+      CLI.COMMANDS.RESUME,
+      CLI.FLAGS.SKIP_GIT,
+      CLI.FLAGS.IGNORE_USER_CONFIG,
+      CLI.FLAGS.IGNORE_RULES,
+      CLI.FLAGS.FULL_AUTO,
+      CLI.FLAGS.JSON,
+      CLI.FLAGS.MODEL,
+      MODELS.DEFAULT,
+      "thread-abc-123",
+      "hello",
+    ]);
   });
 
   it("uses custom model when specified", async () => {
