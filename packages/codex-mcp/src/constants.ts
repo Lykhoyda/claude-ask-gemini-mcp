@@ -29,5 +29,7 @@ export const CLI = {
     EPHEMERAL: "--ephemeral",
     JSON: "--json",
     FULL_AUTO: "--full-auto",
+    IGNORE_USER_CONFIG: "--ignore-user-config",
+    IGNORE_RULES: "--ignore-rules",
   },
 } as const;

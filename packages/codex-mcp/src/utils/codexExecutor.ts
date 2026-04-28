@@ -131,6 +131,11 @@ function buildArgs(prompt: string, model: string, sessionId?: string, useStdin?:
   if (sessionId) base.push(CLI.COMMANDS.RESUME);
   base.push(CLI.FLAGS.SKIP_GIT);
   if (!sessionId) base.push(CLI.FLAGS.EPHEMERAL);
+  // Ignore user-side ~/.codex/config.toml hooks and execpolicy .rules files so
+  // our MCP-wrapped exec stays deterministic regardless of the host machine's
+  // codex configuration. Auth credentials in CODEX_HOME are still loaded.
+  // See ADR-071 / closes #31.
+  base.push(CLI.FLAGS.IGNORE_USER_CONFIG, CLI.FLAGS.IGNORE_RULES);
   base.push(CLI.FLAGS.FULL_AUTO, CLI.FLAGS.JSON, CLI.FLAGS.MODEL, model);
   if (sessionId) base.push(sessionId);
   if (!useStdin) base.push(prompt);
