@@ -67,7 +67,7 @@ export async function executeCommand(
   args: string[],
   onProgress?: (newOutput: string) => void,
   onStderr?: (stderr: string) => void,
-  stdin?: string,
+  stdinPayload?: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const commandId = Logger.commandExecution(command, args);
@@ -86,8 +86,8 @@ export async function executeCommand(
     // supplied (issue #30), we write it before closing — this lets large
     // prompts bypass the ARG_MAX argv ceiling.
     childProcess.stdin.on("error", () => {});
-    if (stdin !== undefined && stdin.length > 0) {
-      childProcess.stdin.write(stdin);
+    if (stdinPayload !== undefined && stdinPayload.length > 0) {
+      childProcess.stdin.write(stdinPayload);
     }
     childProcess.stdin.end();
 

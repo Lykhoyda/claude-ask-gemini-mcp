@@ -834,15 +834,28 @@ describe("executeGeminiCLI stdin path for large prompts (#30)", () => {
     expect(fallbackStdin).toBe(prompt);
   });
 
-  it("respects threshold against the wrapped changeMode prompt size (post-wrap > 16 KiB)", async () => {
-    // Even a small user prompt becomes >16 KiB once wrapped in changeMode instructions
+  it("keeps small changeMode prompts in argv when wrapped size is well below threshold", async () => {
+    // Tiny user prompt + ~1.2 KiB changeMode wrapper = total <16 KiB → argv path.
     const prompt = "fix the bug";
     await executeGeminiCLI({ prompt, changeMode: true });
 
     const [, args, , , stdin] = mockExecuteCommand.mock.calls[0];
     const promptIndex = args.indexOf(CLI.FLAGS.PROMPT);
-    // changeMode wrapper is ~2 KiB; well below threshold; should still be argv
     expect(args[promptIndex + 1]).toContain(prompt);
     expect(stdin).toBeUndefined();
+  });
+
+  it("flips to stdin when changeMode-wrapped prompt exceeds 16 KiB", async () => {
+    // ~15 KiB user content + ~1.2 KiB wrapper → wrapped total > 16 KiB threshold.
+    // useStdin is computed on the wrapped prompt, so this is the live code path
+    // for any large user prompt going through changeMode.
+    const prompt = "x".repeat(15_360);
+    await executeGeminiCLI({ prompt, changeMode: true });
+
+    const [, args, , , stdin] = mockExecuteCommand.mock.calls[0];
+    const promptIndex = args.indexOf(CLI.FLAGS.PROMPT);
+    expect(args[promptIndex + 1]).toBe("");
+    expect(stdin).toContain(prompt);
+    expect(stdin).toContain("[CHANGEMODE INSTRUCTIONS]");
   });
 });
