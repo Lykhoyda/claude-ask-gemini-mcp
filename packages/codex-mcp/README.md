@@ -65,6 +65,16 @@ Add to `claude_desktop_config.json`:
 | `gpt-5.5` | Default — highest capability |
 | `gpt-5.5-mini` | Automatic fallback on quota errors |
 
+## Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ASK_CODEX_MODEL` | `gpt-5.5` | Override the default model |
+| `ASK_CODEX_FALLBACK_MODEL` | `gpt-5.5-mini` | Override the quota-fallback model |
+| `ASK_CODEX_LOAD_USER_CONFIG` | _(unset)_ | Set to `1` to opt back into loading `~/.codex/config.toml` (hooks, MCP servers, preferences) and execpolicy `.rules` files. By default the wrapper passes `--ignore-user-config --ignore-rules` so behavior stays deterministic across host machines. Auth credentials in `CODEX_HOME` always load regardless. See ADR-071. |
+| `GMCPT_TIMEOUT_MS` | `210000` | Per-call timeout for the spawned codex process |
+| `GMCPT_LOG_LEVEL` | `warn` | `debug`, `info`, `warn`, or `error` |
+
 ## Documentation
 
 Full docs at [lykhoyda.github.io/ask-llm](https://lykhoyda.github.io/ask-llm/)

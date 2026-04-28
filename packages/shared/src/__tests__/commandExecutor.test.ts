@@ -108,26 +108,47 @@ Node.js v18.15.0`;
 
 describe("executeCommand stdin payload (issue #30)", () => {
   const ECHO_STDIN = ["-e", "process.stdin.pipe(process.stdout)"];
+  // Real-spawn tests need a generous timeout: Node 22 startup + stdin pipe
+  // setup on Ubuntu CI runners under load has been observed at 8-13s
+  // (vitest default 5s causes false-positive timeouts). Locally these all
+  // run in <100ms; the bump is purely defensive against runner contention.
+  const SPAWN_TIMEOUT_MS = 30_000;
 
-  it("writes stdin payload to child before EOF", async () => {
-    const result = await executeCommand("node", ECHO_STDIN, undefined, undefined, "hello from stdin");
-    expect(result).toBe("hello from stdin");
-  });
+  it(
+    "writes stdin payload to child before EOF",
+    async () => {
+      const result = await executeCommand("node", ECHO_STDIN, undefined, undefined, "hello from stdin");
+      expect(result).toBe("hello from stdin");
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
-  it("supports payloads above the 16 KiB ARG_MAX threshold", async () => {
-    const payload = `${"x".repeat(20_000)}END`;
-    const result = await executeCommand("node", ECHO_STDIN, undefined, undefined, payload);
-    expect(result).toBe(payload);
-    expect(result.length).toBe(20_003);
-  });
+  it(
+    "supports payloads above the 16 KiB ARG_MAX threshold",
+    async () => {
+      const payload = `${"x".repeat(20_000)}END`;
+      const result = await executeCommand("node", ECHO_STDIN, undefined, undefined, payload);
+      expect(result).toBe(payload);
+      expect(result.length).toBe(20_003);
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
-  it("preserves existing zero-stdin behavior when payload is undefined", async () => {
-    const result = await executeCommand("node", ["-e", "console.log('hi')"]);
-    expect(result).toBe("hi");
-  });
+  it(
+    "preserves existing zero-stdin behavior when payload is undefined",
+    async () => {
+      const result = await executeCommand("node", ["-e", "console.log('hi')"]);
+      expect(result).toBe("hi");
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 
-  it("treats empty-string stdin as no-op (still EOFs cleanly)", async () => {
-    const result = await executeCommand("node", ["-e", "console.log('hi')"], undefined, undefined, "");
-    expect(result).toBe("hi");
-  });
+  it(
+    "treats empty-string stdin as no-op (still EOFs cleanly)",
+    async () => {
+      const result = await executeCommand("node", ["-e", "console.log('hi')"], undefined, undefined, "");
+      expect(result).toBe("hi");
+    },
+    SPAWN_TIMEOUT_MS,
+  );
 });

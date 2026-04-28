@@ -131,6 +131,15 @@ function buildArgs(prompt: string, model: string, sessionId?: string, useStdin?:
   if (sessionId) base.push(CLI.COMMANDS.RESUME);
   base.push(CLI.FLAGS.SKIP_GIT);
   if (!sessionId) base.push(CLI.FLAGS.EPHEMERAL);
+  // Ignore user-side ~/.codex/config.toml (hooks, MCP servers, preferences)
+  // and execpolicy .rules files so our MCP-wrapped exec stays deterministic
+  // regardless of host machine codex configuration. Auth credentials in
+  // CODEX_HOME are still loaded. Opt out with ASK_CODEX_LOAD_USER_CONFIG=1
+  // (e.g., users with custom MCP servers registered in ~/.codex/config.toml
+  // who need them available inside ask-codex-mcp invocations). See ADR-071.
+  if (process.env.ASK_CODEX_LOAD_USER_CONFIG !== "1") {
+    base.push(CLI.FLAGS.IGNORE_USER_CONFIG, CLI.FLAGS.IGNORE_RULES);
+  }
   base.push(CLI.FLAGS.FULL_AUTO, CLI.FLAGS.JSON, CLI.FLAGS.MODEL, model);
   if (sessionId) base.push(sessionId);
   if (!useStdin) base.push(prompt);
