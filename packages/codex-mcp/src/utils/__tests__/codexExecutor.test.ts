@@ -167,6 +167,52 @@ describe("JSONL output parsing", () => {
     expect(result.response).toContain("4,500 cached");
   });
 
+  it("surfaces reasoning_output_tokens in stats footer + UsageStats.thinkingTokens (codex 0.125+)", async () => {
+    mockExecuteCommand.mockResolvedValue(
+      [
+        '{"type":"item.completed","item":{"type":"agent_message","text":"Reasoned answer."}}',
+        '{"type":"turn.completed","usage":{"input_tokens":1000,"output_tokens":50,"reasoning_output_tokens":7500}}',
+      ].join("\n"),
+    );
+
+    const result = await executeCodexCLI({ prompt: "think hard" });
+
+    // Footer surfaces the new field with comma formatting, matching the Gemini convention.
+    expect(result.response).toContain("7,500 thinking tokens");
+    // UsageStats.thinkingTokens carries the value for cross-provider aggregation
+    // in get-usage-stats and formatSessionUsage.
+    expect(result.usage?.thinkingTokens).toBe(7500);
+  });
+
+  it("omits thinking tokens line when reasoning_output_tokens is zero (non-reasoning model)", async () => {
+    mockExecuteCommand.mockResolvedValue(
+      [
+        '{"type":"item.completed","item":{"type":"agent_message","text":"Quick answer."}}',
+        '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":20,"reasoning_output_tokens":0}}',
+      ].join("\n"),
+    );
+
+    const result = await executeCodexCLI({ prompt: "quick" });
+
+    expect(result.response).not.toContain("thinking tokens");
+    // Zero is preserved in UsageStats (telemetry caller may want the explicit 0)
+    expect(result.usage?.thinkingTokens).toBe(0);
+  });
+
+  it("treats missing reasoning_output_tokens as undefined (older codex versions)", async () => {
+    mockExecuteCommand.mockResolvedValue(
+      [
+        '{"type":"item.completed","item":{"type":"agent_message","text":"Old codex answer."}}',
+        '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":20}}',
+      ].join("\n"),
+    );
+
+    const result = await executeCodexCLI({ prompt: "old" });
+
+    expect(result.response).not.toContain("thinking tokens");
+    expect(result.usage?.thinkingTokens).toBeUndefined();
+  });
+
   it("extracts thread_id from thread.started event", async () => {
     mockExecuteCommand.mockResolvedValue(
       [

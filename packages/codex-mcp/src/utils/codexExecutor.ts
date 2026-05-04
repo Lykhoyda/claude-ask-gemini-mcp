@@ -15,6 +15,10 @@ interface CodexTurnCompleted {
     input_tokens?: number;
     cached_input_tokens?: number;
     output_tokens?: number;
+    // codex rust-v0.125+ ships reasoning-token counts for reasoning models
+    // (gpt-5.5 family). Optional + backward compatible: older codex versions
+    // simply don't emit the field, so older deserializations get undefined.
+    reasoning_output_tokens?: number;
   };
 }
 
@@ -50,7 +54,7 @@ function buildUsageStats(
     inputTokens: usage?.input_tokens,
     outputTokens: usage?.output_tokens,
     cachedTokens: usage?.cached_input_tokens,
-    thinkingTokens: undefined,
+    thinkingTokens: usage?.reasoning_output_tokens,
     durationMs,
     fellBack,
   };
@@ -61,6 +65,9 @@ function formatStats(usage: CodexTurnCompleted["usage"]): string {
   const parts: string[] = [];
   if (usage.input_tokens != null) parts.push(`${usage.input_tokens.toLocaleString()} input tokens`);
   if (usage.output_tokens != null) parts.push(`${usage.output_tokens.toLocaleString()} output tokens`);
+  // Symmetric with Gemini's "thinking tokens" footer (geminiExecutor.ts:formatStats).
+  if (usage.reasoning_output_tokens != null && usage.reasoning_output_tokens > 0)
+    parts.push(`${usage.reasoning_output_tokens.toLocaleString()} thinking tokens`);
   if (usage.cached_input_tokens != null && usage.cached_input_tokens > 0)
     parts.push(`${usage.cached_input_tokens.toLocaleString()} cached`);
   return parts.length > 0 ? `\n\n[Codex stats: ${parts.join(", ")}]` : "";
