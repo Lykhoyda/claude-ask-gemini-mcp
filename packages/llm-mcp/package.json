@@ -16,7 +16,7 @@
     "test": "vitest run",
     "lint": "biome check src/ && tsc --noEmit",
     "prepack": "node ../../scripts/prepack-bundle.mjs shared gemini-mcp codex-mcp ollama-mcp",
-    "postpublish": "node ../../scripts/postpack-restore.mjs"
+    "postpack": "node ../../scripts/postpack-restore.mjs shared gemini-mcp codex-mcp ollama-mcp"
   },
   "keywords": [
     "mcp",
