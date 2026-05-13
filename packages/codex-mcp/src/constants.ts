@@ -28,7 +28,13 @@ export const CLI = {
     SKIP_GIT: "--skip-git-repo-check",
     EPHEMERAL: "--ephemeral",
     JSON: "--json",
-    FULL_AUTO: "--full-auto",
+    // --full-auto was sugar for `--sandbox workspace-write` (codex 0.128 prints a
+    // deprecation warning on every call; 0.129-alpha makes it a hidden trap with
+    // `conflicts_with = "dangerously_bypass_approvals_and_sandbox"`). codex `exec`
+    // is already non-interactive by definition, so we only need the sandbox part —
+    // approval-never is implicit in the subcommand. Issue #46 / ADR-075.
+    SANDBOX: "--sandbox",
+    SANDBOX_WORKSPACE_WRITE: "workspace-write",
     IGNORE_USER_CONFIG: "--ignore-user-config",
     IGNORE_RULES: "--ignore-rules",
   },

@@ -11,7 +11,7 @@ export const ERROR_MESSAGES = {
   NO_PROMPT_PROVIDED:
     "Please provide a prompt for analysis. Use @ syntax to include files (e.g., '@largefile.js explain what this does') or ask general questions",
   WORKSPACE_TRUST_REQUIRED:
-    "Gemini blocked this call because workspace-trust enforcement is enabled and the current directory is not trusted. To resolve, either (a) unset ASK_GEMINI_REQUIRE_WORKSPACE_TRUST so ask-gemini-mcp re-applies its safe default of GEMINI_TRUST_WORKSPACE=true, (b) export GEMINI_TRUST_WORKSPACE=true yourself, or (c) run `gemini` interactively in this directory once and mark it trusted.",
+    "Gemini blocked this call because workspace-trust enforcement is enabled and the current directory is not trusted. To resolve, either (a) unset ASK_GEMINI_REQUIRE_WORKSPACE_TRUST so ask-gemini-mcp re-applies its safe default of co-emitting GEMINI_CLI_TRUST_WORKSPACE=true (≥0.42) and GEMINI_TRUST_WORKSPACE=true (≤0.41), (b) export GEMINI_CLI_TRUST_WORKSPACE=true yourself on gemini ≥0.42 (or GEMINI_TRUST_WORKSPACE=true on ≤0.41), (c) pass --skip-trust to gemini for this session (≥0.41), or (d) run `gemini` interactively in this directory once and mark it trusted.",
 } as const;
 
 export const STATUS_MESSAGES = {

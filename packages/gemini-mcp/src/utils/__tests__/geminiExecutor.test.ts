@@ -718,42 +718,64 @@ describe("executeGeminiCLI includeDirs support", () => {
 
 describe("executeGeminiCLI workspace trust handling", () => {
   let originalTrust: string | undefined;
+  let originalCliTrust: string | undefined;
   let originalRequireTrust: string | undefined;
 
   beforeEach(() => {
     originalTrust = process.env.GEMINI_TRUST_WORKSPACE;
+    originalCliTrust = process.env.GEMINI_CLI_TRUST_WORKSPACE;
     originalRequireTrust = process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST;
     delete process.env.GEMINI_TRUST_WORKSPACE;
+    delete process.env.GEMINI_CLI_TRUST_WORKSPACE;
     delete process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST;
   });
 
   afterEach(() => {
     if (originalTrust === undefined) delete process.env.GEMINI_TRUST_WORKSPACE;
     else process.env.GEMINI_TRUST_WORKSPACE = originalTrust;
+    if (originalCliTrust === undefined) delete process.env.GEMINI_CLI_TRUST_WORKSPACE;
+    else process.env.GEMINI_CLI_TRUST_WORKSPACE = originalCliTrust;
     if (originalRequireTrust === undefined) delete process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST;
     else process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST = originalRequireTrust;
   });
 
-  it("sets GEMINI_TRUST_WORKSPACE=true by default", async () => {
+  it("co-emits both old and new trust env vars by default (#46 / ADR-075)", async () => {
+    // gemini ≤0.41 reads the old name; gemini ≥0.42 reads only the new name.
+    // Co-emitting both means one ask-gemini-mcp release works against any
+    // gemini-cli version without runtime version detection.
     await executeGeminiCLI({ prompt: "hello" });
 
     expect(process.env.GEMINI_TRUST_WORKSPACE).toBe("true");
+    expect(process.env.GEMINI_CLI_TRUST_WORKSPACE).toBe("true");
   });
 
-  it("does not set GEMINI_TRUST_WORKSPACE when ASK_GEMINI_REQUIRE_WORKSPACE_TRUST=1", async () => {
+  it("does not set either trust env var when ASK_GEMINI_REQUIRE_WORKSPACE_TRUST=1", async () => {
     process.env.ASK_GEMINI_REQUIRE_WORKSPACE_TRUST = "1";
 
     await executeGeminiCLI({ prompt: "hello" });
 
     expect(process.env.GEMINI_TRUST_WORKSPACE).toBeUndefined();
+    expect(process.env.GEMINI_CLI_TRUST_WORKSPACE).toBeUndefined();
   });
 
-  it("does not override a user-supplied GEMINI_TRUST_WORKSPACE value", async () => {
+  it("does not override a user-supplied GEMINI_TRUST_WORKSPACE value (≤0.41 escape hatch)", async () => {
     process.env.GEMINI_TRUST_WORKSPACE = "false";
 
     await executeGeminiCLI({ prompt: "hello" });
 
     expect(process.env.GEMINI_TRUST_WORKSPACE).toBe("false");
+    // When the user has explicitly set the old name, we early-return and DON'T
+    // co-emit the new name either — respecting the user's explicit choice.
+    expect(process.env.GEMINI_CLI_TRUST_WORKSPACE).toBeUndefined();
+  });
+
+  it("does not override a user-supplied GEMINI_CLI_TRUST_WORKSPACE value (≥0.42 escape hatch)", async () => {
+    process.env.GEMINI_CLI_TRUST_WORKSPACE = "false";
+
+    await executeGeminiCLI({ prompt: "hello" });
+
+    expect(process.env.GEMINI_CLI_TRUST_WORKSPACE).toBe("false");
+    expect(process.env.GEMINI_TRUST_WORKSPACE).toBeUndefined();
   });
 
   it("throws friendly error and does not fall back to Flash on FatalUntrustedWorkspaceError", async () => {
@@ -787,6 +809,7 @@ describe("executeGeminiCLI workspace trust handling", () => {
 
     await expect(executeGeminiCLI({ prompt: "hello" })).rejects.toThrow(ERROR_MESSAGES.WORKSPACE_TRUST_REQUIRED);
     expect(process.env.GEMINI_TRUST_WORKSPACE).toBeUndefined();
+    expect(process.env.GEMINI_CLI_TRUST_WORKSPACE).toBeUndefined();
     expect(mockExecuteCommand).toHaveBeenCalledOnce();
   });
 

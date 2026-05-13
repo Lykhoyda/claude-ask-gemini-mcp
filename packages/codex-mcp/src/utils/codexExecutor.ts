@@ -155,7 +155,7 @@ function buildArgs(prompt: string, model: string, sessionId?: string, useStdin?:
   if (process.env.ASK_CODEX_LOAD_USER_CONFIG !== "1") {
     base.push(CLI.FLAGS.IGNORE_USER_CONFIG, CLI.FLAGS.IGNORE_RULES);
   }
-  base.push(CLI.FLAGS.FULL_AUTO, CLI.FLAGS.JSON, CLI.FLAGS.MODEL, model);
+  base.push(CLI.FLAGS.SANDBOX, CLI.FLAGS.SANDBOX_WORKSPACE_WRITE, CLI.FLAGS.JSON, CLI.FLAGS.MODEL, model);
   if (sessionId) base.push(sessionId);
   if (!useStdin) base.push(prompt);
   return base;
