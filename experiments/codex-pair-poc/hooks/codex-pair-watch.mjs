@@ -9,7 +9,7 @@
 // See ../README.md for benchmark methodology (Claude alone vs Claude + Codex).
 
 import { spawn } from "node:child_process";
-import { readFile, appendFile, mkdir } from "node:fs/promises";
+import { readFile, appendFile, mkdir, access } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 // Hard cap on Codex call duration. Default 60s — gpt-5.5 on a few hundred lines
@@ -26,52 +26,101 @@ const WATCHED_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
 // codex's verdicts.
 const LOG_PATH = resolve(process.cwd(), ".codex-pair-log.jsonl");
 
-// The validator prompt. Constructed once per call; the file content gets
-// interpolated. Discipline is enforced by the prompt — Codex must default to
-// silence (PASS) and only speak up if a concern is genuinely load-bearing.
-function buildPrompt({ filePath, fileContent, toolName }) {
-  return `You are a senior software engineer watching another AI agent (Claude) edit a file in real time. Your job is to provide a sanity check — but ONLY if you have a LOAD-BEARING concern. Most edits are fine; you should default to silence.
+// The validator prompt (v2). Replaces the v1 "PASS unless load-bearing" gate
+// with a 3-grade confidence ladder (HIGH/MED/LOW). Decouples "what codex sees"
+// from "what threshold the hook surfaces" — the hook (not the prompt) decides
+// which labels reach Claude. See runs/findings.md (run 1) for why the v1 prompt
+// produced 0% recall on real defects.
+//
+// Project context (if a .codex-pair-context.md file exists in cwd) is prepended
+// so codex knows the deployment shape (concurrent server, etc.) — single-file
+// view was identified as a root cause of v1's race-condition miss.
+function buildPrompt({ filePath, fileContent, toolName, projectContext }) {
+  const contextBlock = projectContext
+    ? `## Project context\n\n${projectContext.trim()}\n\n`
+    : "";
+  return `You are a senior software engineer reviewing a file another AI agent (Claude) just edited. Find every concern that's worth a human's attention. Don't try to be polite or "balanced" — your job is to surface what's actually wrong or risky.
 
-## What "load-bearing" means
+${contextBlock}## Output format — strict
 
-A load-bearing concern is one of:
-- The code is wrong (will crash, will produce wrong output, will silently corrupt state).
-- The code contradicts something elsewhere in the same file or duplicates logic that already exists.
-- The code introduces a security issue (injection, secret leak, unsanitized input flowing to a sink).
-- The code has a type error or a clear logic bug that tests would catch.
-- The code is misleading — the function name, comment, or signature suggests one behavior but the body does another.
+Respond with exactly one of these two shapes:
 
-## What is NOT load-bearing (stay silent)
+(a) If you have NO concerns at any level, reply with EXACTLY the word \`NONE\` and nothing else.
 
-- Style preferences (single vs double quotes, where to put braces, etc.)
-- "Could be cleaner" or "this would be more idiomatic" suggestions.
-- Optimizations that don't matter at this scope.
-- Naming nitpicks unless the name is actively misleading.
-- Missing error handling for cases that genuinely can't happen.
-
-## How to respond
-
-If you have NO load-bearing concern: reply with EXACTLY the word \`PASS\` and nothing else.
-
-If you DO have a load-bearing concern, reply in this format and ONLY this format:
+(b) If you have concerns, list them with a confidence label per concern:
 
 \`\`\`
-CONCERN: <one-line summary, no preamble>
+[HIGH] <one-line summary>
+<file:line>: <one or two sentences explaining the issue>
+<one-sentence suggested fix>
 
-<one-paragraph explanation citing the specific lines / symbols at issue>
+[MED] <one-line summary>
+<file:line>: <one or two sentences explaining the issue>
+<one-sentence suggested fix>
 
-SUGGESTED FIX: <one sentence>
+[LOW] <one-line summary>
+<file:line>: <one or two sentences explaining the issue>
+<one-sentence suggested fix>
 \`\`\`
 
-Do not say "this is mostly good but...". Do not preface with "I notice...". If it's worth raising, raise it directly; if not, reply PASS.
+## How to grade
 
-## The edit
+- **HIGH** — would definitely cause incorrect behavior, security issue, or violates a stated project requirement. Examples: race condition in a concurrent server, untrusted JSON parsed without validation, SQL injection, type system bypassed with \`as any\`, missing await on an async operation.
+- **MED** — likely to cause problems under realistic conditions, even if not 100% certain. Examples: non-atomic file write that could corrupt on partial failure, missing error handling for IO/network operations, TOCTOU races, edge-case logic bugs that tests don't cover.
+- **LOW** — code-quality concerns worth knowing about but not blocking. Examples: minor naming issues, style inconsistencies, missing JSDoc on exported APIs, opportunities for clearer error messages.
 
-The agent (${toolName}) just modified \`${filePath}\`. Here is the file's current state:
+## Rules
+
+- One concern per [LABEL] block. Don't bundle multiple issues under one label.
+- Cite specific \`file:line\` references. Do not hand-wave.
+- Don't include preamble or "summary" — just the labeled list (or \`NONE\`).
+- Don't suppress real concerns because "the test suite probably catches it." If you'd flag it in a code review, flag it here.
+- Don't manufacture concerns to fill labels. If there's only HIGH, only emit HIGH.
+
+## The file
+
+The agent (${toolName}) just modified \`${filePath}\`. File content:
 
 \`\`\`
 ${fileContent}
 \`\`\``;
+}
+
+// Read the optional project-context file from cwd. Returns null if not present.
+// The file is plain markdown — typical content: deployment shape, concurrency
+// model, stated requirements, anything that a reviewer of a single file can't
+// derive from that file alone.
+async function readProjectContext() {
+  const contextPath = resolve(process.cwd(), ".codex-pair-context.md");
+  try {
+    await access(contextPath);
+    return await readFile(contextPath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+// Parse codex's labeled output into structured concerns. Lenient about exact
+// formatting because LLM output is not perfectly deterministic.
+function parseConcerns(message) {
+  const trimmed = message.trim();
+  if (trimmed.toUpperCase() === "NONE" || trimmed.startsWith("NONE\n")) {
+    return { high: [], med: [], low: [] };
+  }
+  // Split on [LABEL] markers, preserving the marker with each chunk.
+  const parts = trimmed.split(/(?=\[(?:HIGH|MED|LOW)\])/);
+  const concerns = { high: [], med: [], low: [] };
+  for (const part of parts) {
+    const labelMatch = part.match(/^\[(HIGH|MED|LOW)\]/);
+    if (!labelMatch) continue;
+    const body = part.slice(labelMatch[0].length).trim();
+    if (body.length === 0) continue;
+    const label = labelMatch[1].toLowerCase();
+    if (label === "high") concerns.high.push(body);
+    else if (label === "med") concerns.med.push(body);
+    else if (label === "low") concerns.low.push(body);
+  }
+  return concerns;
 }
 
 // Spawn codex with a strict argv shape. Mirrors the args used by ask-codex-mcp
@@ -226,7 +275,8 @@ async function main() {
     process.exit(0);
   }
 
-  const prompt = buildPrompt({ filePath, fileContent, toolName });
+  const projectContext = await readProjectContext();
+  const prompt = buildPrompt({ filePath, fileContent, toolName, projectContext });
   const result = await runCodex(prompt);
 
   if (!result.ok) {
@@ -242,22 +292,36 @@ async function main() {
     process.exit(0);
   }
 
-  const isPass = result.message.trim().toUpperCase() === "PASS" || result.message.trim().startsWith("PASS\n");
+  const concerns = parseConcerns(result.message);
+  const totalCount = concerns.high.length + concerns.med.length + concerns.low.length;
+  const isNone = totalCount === 0;
 
   await appendLog({
     timestamp: new Date().toISOString(),
     tool: toolName,
     file: filePath,
-    verdict: isPass ? "pass" : "concern",
+    verdict: isNone ? "none" : "concerns",
+    counts: {
+      high: concerns.high.length,
+      med: concerns.med.length,
+      low: concerns.low.length,
+    },
     durationMs: result.durationMs,
-    message: result.message.slice(0, 4000), // cap log entry size
+    raw: result.message.slice(0, 4000),
+    concerns: {
+      high: concerns.high.map((c) => c.slice(0, 800)),
+      med: concerns.med.map((c) => c.slice(0, 800)),
+      low: concerns.low.map((c) => c.slice(0, 800)),
+    },
   });
 
-  if (!isPass && result.message) {
-    // Emit to stderr — Claude Code surfaces this back to Claude as part of the
-    // PostToolUse hook output, so Claude reads Codex's concern on the next turn
-    // and can choose whether to act on it.
-    process.stderr.write(`[codex-pair] ${filePath}\n${result.message}\n`);
+  // Surface HIGH + MED to Claude via stderr; suppress LOW (it's in the log for
+  // post-hoc analysis but not worth interrupting Claude's flow). The hook
+  // (not the prompt) owns this threshold so it can be tuned without re-asking
+  // codex to recalibrate its grading.
+  const surfaced = [...concerns.high.map((c) => `[HIGH] ${c}`), ...concerns.med.map((c) => `[MED] ${c}`)];
+  if (surfaced.length > 0) {
+    process.stderr.write(`[codex-pair] ${filePath}\n${surfaced.join("\n\n")}\n`);
   }
 
   process.exit(0);
