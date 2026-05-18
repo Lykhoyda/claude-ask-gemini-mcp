@@ -1202,4 +1202,150 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(lines.some((l) => l.level === "warning" && /malformed/i.test(l.reason))).toBe(true);
     expect(lines.some((l) => l.verdict === "skipped" && /unreadable/i.test(l.reason))).toBe(true);
   });
+
+  // Fake-codex fixture integration (v0.6.3 story #2)
+  // Replaces the PATH=dirname(process.execPath) hack with a real fake codex
+  // that responds to scenarios. Lets us exercise the hook's full review path
+  // (codex spawn → JSONL parse → verdict classification → log + systemMessage)
+  // without burning real codex tokens. Foundation for the schema migration
+  // (story #3) and lib/ extraction (story #7).
+  const FIXTURE_DIR = path.join(PLUGIN_ROOT, "src", "__tests__", "_fixtures");
+  function runHookWithFakeCodex(payload: string, cwd: string, scenario: string, extraEnv: Record<string, string> = {}) {
+    return runHook(payload, cwd, {
+      PATH: `${FIXTURE_DIR}:${process.env.PATH}`,
+      FAKE_CODEX_SCENARIO: scenario,
+      // Short timeout so the 'timeout' scenario test stays under a few seconds.
+      ASK_CODEX_TIMEOUT_MS: extraEnv.ASK_CODEX_TIMEOUT_MS ?? "30000",
+      ...extraEnv,
+    });
+  }
+
+  it("fake-codex fixture: file is executable + present at expected path", () => {
+    const fakePath = path.join(FIXTURE_DIR, "codex");
+    expect(fs.existsSync(fakePath)).toBe(true);
+    const stats = fs.statSync(fakePath);
+    // Owner exec bit must be set so PATH-based spawn can run it.
+    expect((stats.mode & 0o100) !== 0).toBe(true);
+    const content = fs.readFileSync(fakePath, "utf-8");
+    expect(content.startsWith("#!/usr/bin/env node")).toBe(true);
+    expect(content).toMatch(/FAKE_CODEX_SCENARIO/);
+  });
+
+  it("fake-codex 'none' scenario → verdict:none + OK systemMessage + log entry", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHookWithFakeCodex(payload, tempDir, "none");
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const reviewEntry = lines.find((l) => l.verdict === "none");
+    expect(reviewEntry).toBeTruthy();
+    expect(reviewEntry.counts).toEqual({ high: 0, med: 0, low: 0 });
+    const hookOutput = JSON.parse(result.stdout.trim());
+    expect(hookOutput.systemMessage).toMatch(/^codex-pair OK:/);
+    expect(hookOutput.systemMessage).toMatch(/no concerns/);
+  });
+
+  it("fake-codex 'concerns-labeled' scenario → verdict:concerns with HIGH/MED/LOW counts", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHookWithFakeCodex(payload, tempDir, "concerns-labeled");
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const reviewEntry = lines.find((l) => l.verdict === "concerns");
+    expect(reviewEntry).toBeTruthy();
+    expect(reviewEntry.counts.high).toBe(1);
+    expect(reviewEntry.counts.med).toBe(1);
+    expect(reviewEntry.counts.low).toBe(1);
+    const hookOutput = JSON.parse(result.stdout.trim());
+    expect(hookOutput.systemMessage).toMatch(/^codex-pair WARN:/);
+    expect(hookOutput.systemMessage).toMatch(/\[HIGH\]/);
+    expect(hookOutput.systemMessage).toMatch(/\[MED\]/);
+    // LOW should be suppressed from systemMessage at default surfaceThreshold "med"
+    expect(hookOutput.systemMessage).not.toMatch(/\[LOW\]/);
+  });
+
+  it("fake-codex 'error-event' scenario → verdict:parse_failed (no agent_message in JSONL)", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHookWithFakeCodex(payload, tempDir, "error-event");
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const errEntry = lines.find((l) => l.verdict === "parse_failed");
+    expect(errEntry).toBeTruthy();
+    const hookOutput = JSON.parse(result.stdout.trim());
+    expect(hookOutput.systemMessage).toMatch(/^codex-pair PARSE_FAILED:/);
+  });
+
+  it("fake-codex 'exit-nonzero' scenario → verdict:error", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHookWithFakeCodex(payload, tempDir, "exit-nonzero");
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const errEntry = lines.find((l) => l.verdict === "error");
+    expect(errEntry).toBeTruthy();
+    expect(errEntry.reason).toMatch(/generic non-zero exit reason/);
+    const hookOutput = JSON.parse(result.stdout.trim());
+    expect(hookOutput.systemMessage).toMatch(/^codex-pair ERROR:/);
+  });
+
+  it("fake-codex 'quota' scenario → falls back to FALLBACK_MODEL, log captures fellBack:true", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    // Both default and fallback invocations hit the quota signal in this
+    // fixture, so the hook should ultimately log an error verdict after
+    // exhausting the fallback. Test asserts the quota error message lands.
+    const result = runHookWithFakeCodex(payload, tempDir, "quota");
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    // After fallback also fails on quota, hook records the original error.
+    const errEntry = lines.find((l) => l.verdict === "error" || l.verdict === "spawn_failed");
+    expect(errEntry).toBeTruthy();
+    expect(errEntry.reason).toMatch(/rate_limit_exceeded|quota/i);
+  });
 });

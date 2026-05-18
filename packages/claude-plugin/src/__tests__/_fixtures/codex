@@ -1,0 +1,181 @@
+#!/usr/bin/env node
+// fake-codex — test fixture mimicking the `codex exec --json` CLI surface
+// that the codex-pair hook spawns. Tests prepend this file's directory to
+// PATH so `spawn("codex", ...)` resolves here instead of a real codex
+// install. Behavior is selected via FAKE_CODEX_SCENARIO env var.
+//
+// Why CJS (no .mjs): the hook calls spawn("codex", ...) which does PATH
+// lookup. The resolved binary needs to be extensionless. Node treats
+// extensionless files with a node shebang as CJS by default, and adding a
+// sibling package.json with "type":"module" just to enable ESM for one
+// fixture isn't worth the complexity for ~120 LOC.
+
+"use strict";
+
+const SCENARIO = process.env.FAKE_CODEX_SCENARIO || "none";
+
+// Drain stdin so the hook's child.stdin.write+end pattern doesn't hang
+// waiting for the buffer to flush. We don't actually use the prompt content
+// — scenarios are env-driven.
+function drainStdin() {
+  return new Promise((resolve) => {
+    let buf = "";
+    process.stdin.on("data", (chunk) => {
+      buf += chunk.toString();
+    });
+    process.stdin.on("end", () => resolve(buf));
+    process.stdin.on("error", () => resolve(buf));
+  });
+}
+
+function emitJsonl(obj) {
+  process.stdout.write(`${JSON.stringify(obj)}\n`);
+}
+
+function emitAgentMessage(text) {
+  emitJsonl({ type: "thread.started", thread_id: "fake-thread-123" });
+  emitJsonl({ type: "item.completed", item: { type: "agent_message", text } });
+  emitJsonl({
+    type: "turn.completed",
+    usage: { input_tokens: 100, output_tokens: 20, cached_input_tokens: 0 },
+  });
+}
+
+async function run() {
+  await drainStdin();
+
+  // Test override: bypass scenario dispatch entirely
+  if (process.env.FAKE_CODEX_RAW_STDOUT) {
+    process.stdout.write(process.env.FAKE_CODEX_RAW_STDOUT);
+    process.exit(Number(process.env.FAKE_CODEX_EXIT_CODE ?? 0));
+  }
+
+  switch (SCENARIO) {
+    case "none":
+      // The current ADR-077 happy path: codex says NONE.
+      emitAgentMessage("NONE");
+      process.exit(0);
+      break;
+
+    case "concerns-labeled":
+      // Current HIGH/MED/LOW free-form text format that parseConcerns reads.
+      emitAgentMessage(
+        [
+          "[HIGH] critical issue summary",
+          "src/foo.ts:42: would cause incorrect behavior under X condition",
+          "wrap the call in a try/catch",
+          "",
+          "[MED] something to watch",
+          "src/foo.ts:78: edge case Y not handled",
+          "add an explicit guard for Y",
+          "",
+          "[LOW] style nit",
+          "src/foo.ts:103: could be cleaner",
+          "consider extracting helper",
+        ].join("\n"),
+      );
+      process.exit(0);
+      break;
+
+    case "concerns-schema":
+      // Future structured JSON output (story #3 will lean on this).
+      emitAgentMessage(
+        JSON.stringify({
+          verdict: "needs-attention",
+          summary: "Found one critical issue and one medium concern.",
+          findings: [
+            {
+              severity: "high",
+              title: "Float arithmetic on money values",
+              body: "Using IEEE 754 floats for currency loses precision under tax computation.",
+              file: "src/billing/charge.ts",
+              line_start: 42,
+              line_end: 45,
+              confidence: 0.92,
+              recommendation: "Switch to integer cents or a decimal library.",
+            },
+            {
+              severity: "medium",
+              title: "Missing input validation",
+              body: "setQuantity bypasses the schema validation enforced on the primary write path.",
+              file: "src/billing/cart.ts",
+              line_start: 88,
+              line_end: 92,
+              confidence: 0.85,
+              recommendation: "Apply the same Zod schema before mutating quantity.",
+            },
+          ],
+          next_steps: ["Decide on integer-cents migration plan", "Audit other write paths for bypass"],
+        }),
+      );
+      process.exit(0);
+      break;
+
+    case "parse-failed":
+      // Emit garbage that won't parse as JSONL — exercises the hook's
+      // parse_failed verdict path.
+      process.stdout.write("not valid jsonl at all\n");
+      process.stdout.write("definitely not json {][}\n");
+      process.exit(0);
+      break;
+
+    case "error-event":
+      // Codex --json emits a `type:"error"` event when the agent itself fails.
+      // The hook should throw parse_failed because no agent_message arrived.
+      emitJsonl({ type: "thread.started", thread_id: "fake-thread-456" });
+      emitJsonl({ type: "error", message: "codex-side error condition" });
+      process.exit(0);
+      break;
+
+    case "exit-nonzero":
+      // Codex exits non-zero with stderr — exercises the hook's `error` verdict.
+      process.stderr.write("fake codex: generic non-zero exit reason\n");
+      process.exit(7);
+      break;
+
+    case "quota":
+      // Quota signal in stderr — hook should fall back to FALLBACK_MODEL.
+      process.stderr.write("rate_limit_exceeded: you have exhausted your capacity on this model\n");
+      process.exit(1);
+      break;
+
+    case "transient": {
+      // Transient network signal — hook should retry once.
+      process.stderr.write("ECONNRESET while connecting to upstream\n");
+      // Read attempt counter from a file so the second invocation can succeed.
+      const fs = require("node:fs");
+      const counterFile = process.env.FAKE_CODEX_ATTEMPT_FILE;
+      if (counterFile) {
+        let attempts = 0;
+        try {
+          attempts = Number(fs.readFileSync(counterFile, "utf8")) || 0;
+        } catch {}
+        fs.writeFileSync(counterFile, String(attempts + 1));
+        if (attempts >= 1) {
+          // Second attempt succeeds.
+          emitAgentMessage("NONE");
+          process.exit(0);
+        }
+      }
+      process.exit(1);
+      break;
+    }
+
+    case "timeout":
+      // Hang longer than the hook's timeout. Tests should use a short
+      // ASK_CODEX_TIMEOUT_MS (e.g. 500ms) to keep the test under 2s.
+      await new Promise((resolve) => setTimeout(resolve, 30_000));
+      emitAgentMessage("NEVER REACHED");
+      process.exit(0);
+      break;
+
+    default:
+      process.stderr.write(`fake-codex: unknown FAKE_CODEX_SCENARIO=${SCENARIO}\n`);
+      process.exit(2);
+  }
+}
+
+run().catch((err) => {
+  process.stderr.write(`fake-codex internal error: ${err?.message ?? String(err)}\n`);
+  process.exit(99);
+});
