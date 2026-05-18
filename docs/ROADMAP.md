@@ -1,5 +1,22 @@
 # Roadmap
 
+## Active plan: codex-pair stability hardening (2026-05-18)
+
+Following the v0.6.0 batch and v0.6.1 / v0.6.2 patches, the next ship cadence is **driven by stability**, informed by:
+
+- Multi-provider brainstorm of `openai/codex-plugin-cc` patterns (Gemini + Codex + Claude Opus).
+- Multi-review of the resulting plan that revoked one recommendation (Stop hook migration — invalidated by our own ADR-048) and promoted the fake-codex fixture from Tier 3 to Tier 1.
+
+**Sequencing for v0.6.3 → v0.7.0+:**
+
+1. **v0.6.3 — Tier 1 hardening (no architectural decision required):** fake-codex test fixture, SKILL.md docs-drift fix, structured JSON output contract (replaces regex parser), cross-platform process-tree termination, atomic state writes audit.
+2. **v0.6.4–v0.7.0 — Tier 2 (ADR-required):** PostToolUse debounce/coalesce (replaces dropped Stop migration), targeted `lib/` extraction (3-5 files), prompt template externalization with golden tests, app-server broker + SessionStart/SessionEnd lifecycle.
+3. **v0.7.0+ — Tier 3 (defer):** health-check helpers, persistent job state, model aliases.
+
+Full design + per-item effort estimates + ADR dependencies + verified empirical basis: [`docs/plans/2026-05-18-codex-plugin-cc-adoption-roadmap.md`](plans/2026-05-18-codex-plugin-cc-adoption-roadmap.md).
+
+**ADRs to author during this work:** ADR-083 (output contract), ADR-084 (debounce semantics), ADR-085 (module boundary policy), ADR-086 (broker transport + lifecycle).
+
 ## ~~Priority 2: Claude Code Plugin~~ ALL DONE
 - See [design doc](plans/2026-02-25-claude-code-plugin-design.md)
 
