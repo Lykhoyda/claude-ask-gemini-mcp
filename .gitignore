@@ -50,3 +50,9 @@ packages/*/package.json.bak
 # shared review rubric), but the log and cache must stay local.
 .codex-pair-log.jsonl
 .codex-pair-cache/
+
+# git worktrees — per-developer isolated working copies created via
+# `git worktree add .worktrees/<branch>`. The skill that creates these
+# requires the directory to be gitignored so worktree contents don't
+# accidentally land in commits to main.
+.worktrees/
