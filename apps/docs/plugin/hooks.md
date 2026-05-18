@@ -138,6 +138,66 @@ Output shape (one line per entry):
 
 Zero workspace imports — runs on a marketplace install with no `node_modules`.
 
+### If the hook isn't firing automatically: the project-settings workaround (issue #74)
+
+Some Claude Code installations don't auto-invoke plugin-declared PostToolUse hooks even though the plugin is correctly installed and `/reload-plugins` reports the hook count. This appears to be a Claude Code platform issue with the plugin-hook dispatch path — see [issue #74](https://github.com/Lykhoyda/ask-llm/issues/74) for the full diagnostic chain. The hook script itself works perfectly when invoked manually or when registered via a `~/.claude/settings.json` / `.claude/settings.local.json` `hooks` block.
+
+**Quick diagnostic**: edit any file under your marker-anchored project. If `.codex-pair-log.jsonl` mtime doesn't advance within ~60s, you're hitting the dispatch bug.
+
+**Workaround**: add a `hooks.PostToolUse` block to your **project-local** `.claude/settings.local.json` (per-developer; gitignored by convention) that invokes the hook script directly, bypassing the plugin-dispatch path. Pick the command form that matches your use case:
+
+### Form A — Plugin maintainer (you're working on the ask-llm repo itself)
+
+Point at the local repo source. Always reflects your current branch's working tree, so you're dogfooding the code you're actually writing — and no manual update needed on version bumps:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /absolute/path/to/ask-llm/packages/claude-plugin/scripts/codex-pair-watch.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Form B — Plugin user (you installed via marketplace)
+
+Resolve the highest semver-sorted version from the cache at invocation time, so the workaround keeps working across plugin updates without manual edits:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'V=$(ls -1d $HOME/.claude/plugins/cache/ask-llm-plugins/ask-llm/*/ 2>/dev/null | sort -V | tail -1); [ -n \"$V\" ] && node \"$V/scripts/codex-pair-watch.mjs\"'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The `sort -V | tail -1` picks the highest semver directory under the cache. Silent no-op if no install is present.
+
+### After either form
+
+Run `/reload-plugins` to pick up the new hook config. The next Edit/Write/MultiEdit should fire the hook automatically (proven by `codex-pair OK:`/`WARN:` systemMessage in the transcript + a new `.codex-pair-log.jsonl` entry — typical wall clock 5-30s per call).
+
+Note: this workaround is per-developer (project-local) and gitignored. Once Claude Code's plugin-hook dispatch is fixed upstream, you can remove the `hooks` block and rely on the plugin's own registration again.
+
 ## CLI Binaries
 
 The plugin also ships CLI binaries you can call directly from your shell — useful for piping diffs into a provider outside of any hook:
