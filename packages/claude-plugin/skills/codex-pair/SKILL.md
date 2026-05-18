@@ -41,6 +41,8 @@ The hook is always loaded by the plugin, but **self-gates on this file's presenc
 
 The marker file's *presence* is the switch; its *content* is the context codex needs to review intelligently. One artifact, two purposes.
 
+**Commit `.codex-pair-context.md`** to the repo so the whole team (and CI agents) share the same project context and reviewer behavior. **Add `.codex-pair-log.jsonl` to `.gitignore`** — it's per-developer call telemetry, grows continuously, and contains no information worth versioning.
+
 ## How to disable
 
 | Goal | How |
