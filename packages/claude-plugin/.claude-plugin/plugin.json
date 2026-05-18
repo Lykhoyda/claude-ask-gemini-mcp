@@ -1,6 +1,6 @@
 {
   "name": "ask-llm",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "AI-to-AI collaboration — review code, brainstorm ideas, and debate plans across Gemini, Codex, and Ollama",
   "author": {
     "name": "Anton Lykhoyda",
@@ -8,5 +8,12 @@
   },
   "repository": "https://github.com/Lykhoyda/ask-llm",
   "license": "MIT",
-  "keywords": ["gemini", "codex", "ollama", "code-review", "ai-collaboration", "brainstorm"]
+  "keywords": [
+    "gemini",
+    "codex",
+    "ollama",
+    "code-review",
+    "ai-collaboration",
+    "brainstorm"
+  ]
 }

@@ -95,14 +95,31 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/parseConcerns/);
   });
 
-  it("surfaces HIGH+MED to stderr, suppresses LOW (threshold in hook, not prompt)", () => {
-    // The threshold-in-hook design is load-bearing per ADR-077
-    expect(script).toMatch(/concerns\.high.*HIGH/s);
-    expect(script).toMatch(/concerns\.med.*MED/s);
-    // LOW must NOT appear in the stderr surface array
-    const surfaceBlock = script.match(/const surfaced[\s\S]*?process\.stderr\.write/);
-    expect(surfaceBlock).toBeTruthy();
-    expect(surfaceBlock?.[0]).not.toMatch(/concerns\.low/);
+  it("surfaces HIGH+MED via systemMessage stdout, suppresses LOW (threshold in hook, not prompt)", () => {
+    // The threshold-in-hook design is load-bearing per ADR-077. The surface
+    // moved from stderr to a JSON systemMessage on stdout so Claude Code can
+    // render it as an inline UI notice instead of a stderr warning.
+    expect(script).toMatch(/buildVerdictMessage/);
+    expect(script).toMatch(/emitSystemMessage/);
+    expect(script).toMatch(/systemMessage/);
+
+    const verdictBlock = script.match(/function buildVerdictMessage[\s\S]*?^}/m);
+    expect(verdictBlock).toBeTruthy();
+    expect(verdictBlock?.[0]).toMatch(/concerns\.high.*HIGH/s);
+    expect(verdictBlock?.[0]).toMatch(/concerns\.med.*MED/s);
+    // LOW details must NOT be expanded into the surfaced body. A count
+    // mention (e.g. "0L") is fine — it nudges the user to check the log —
+    // but `concerns.low.map(...)` would surface the actual concern text.
+    expect(verdictBlock?.[0]).not.toMatch(/concerns\.low\.map/);
+  });
+
+  it("emits hook JSON to stdout (continue:true + systemMessage) instead of stderr", () => {
+    // Previously the hook wrote raw lines to process.stderr.write. The new
+    // contract is structured stdout JSON parsed by Claude Code.
+    expect(script).toMatch(/process\.stdout\.write/);
+    expect(script).toMatch(/JSON\.stringify\(\s*\{\s*continue:\s*true/);
+    // No more direct stderr writes for the verdict
+    expect(script).not.toMatch(/process\.stderr\.write/);
   });
 
   it("logs every call to .codex-pair-log.jsonl", () => {
@@ -176,8 +193,9 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     });
     const result = runHook(payload, tempDir);
     expect(result.status).toBe(0);
-    // Should produce no stderr (silent passthrough)
+    // Should produce no output at all — silent passthrough on non-watched tools
     expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("");
   });
 
   it("exits 0 silently when marker file is absent (the load-bearing gate)", () => {
@@ -192,6 +210,8 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     const result = runHook(payload, tempDir);
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
+    // No stdout either — gating path must not pollute Claude Code with notices
+    expect(result.stdout).toBe("");
     // No log file should be created without the marker — zero-cost no-op
     expect(fs.existsSync(path.join(tempDir, ".codex-pair-log.jsonl"))).toBe(false);
   });
@@ -241,6 +261,13 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     const logEntry = JSON.parse(fs.readFileSync(logPath, "utf-8").trim());
     expect(logEntry.verdict).toBe("skipped");
     expect(logEntry.reason).toMatch(/unreadable/i);
+    // New UI contract: hook surfaces a SKIP systemMessage so the user sees in
+    // the Claude Code transcript that the hook attempted to run.
+    expect(result.stdout.trim().length).toBeGreaterThan(0);
+    const hookOutput = JSON.parse(result.stdout.trim());
+    expect(hookOutput.continue).toBe(true);
+    expect(hookOutput.systemMessage).toMatch(/codex-pair SKIP/);
+    expect(hookOutput.systemMessage).toMatch(/unreadable/i);
   });
 
   it("processes a file containing literal triple-backticks without breaking the gate", () => {

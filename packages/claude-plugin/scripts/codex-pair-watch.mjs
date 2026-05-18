@@ -55,6 +55,36 @@ async function readStdin() {
   });
 }
 
+// Surface a one-line (or multi-line) notice to the Claude Code UI by emitting
+// hook JSON to stdout. Claude Code parses `systemMessage` and renders it as an
+// inline transcript message. We await the write-callback so the bytes are
+// flushed to the parent before process.exit terminates us.
+function emitSystemMessage(text) {
+  return new Promise((resolveWrite) => {
+    const payload = JSON.stringify({ continue: true, systemMessage: text });
+    process.stdout.write(`${payload}\n`, () => resolveWrite());
+  });
+}
+
+function formatDuration(durationMs) {
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function buildVerdictMessage({ filePath, concerns, fellBack, durationMs }) {
+  const total = concerns.high.length + concerns.med.length + concerns.low.length;
+  const flag = fellBack ? " [fallback model]" : "";
+  if (total === 0) {
+    return `codex-pair OK${flag}: ${filePath} — no concerns (${formatDuration(durationMs)})`;
+  }
+  const counts = `${concerns.high.length}H / ${concerns.med.length}M / ${concerns.low.length}L`;
+  const header = `codex-pair WARN${flag}: ${filePath} — ${counts} (${formatDuration(durationMs)})`;
+  const details = [
+    ...concerns.high.map((c) => `[HIGH]\n${c}`),
+    ...concerns.med.map((c) => `[MED]\n${c}`),
+  ];
+  return details.length > 0 ? `${header}\n\n${details.join("\n\n")}` : header;
+}
+
 async function findMarkerUp(startDir) {
   const home = homedir();
   let current = resolve(startDir);
@@ -311,6 +341,7 @@ async function main() {
       verdict: "skipped",
       reason: `unreadable: ${err.message}`,
     });
+    await emitSystemMessage(`codex-pair SKIP: ${filePath} — unreadable (${err.message})`);
     process.exit(0);
   }
 
@@ -323,6 +354,9 @@ async function main() {
       verdict: "skipped",
       reason: `file too large: ${fileBytes} bytes (cap: ${MAX_FILE_BYTES})`,
     });
+    await emitSystemMessage(
+      `codex-pair SKIP: ${filePath} — file too large (${fileBytes} bytes, cap ${MAX_FILE_BYTES})`,
+    );
     process.exit(0);
   }
 
@@ -343,19 +377,25 @@ async function main() {
     response = result.response;
     fellBack = result.fellBack;
   } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    const durationMs = Date.now() - startedAt;
     await appendLog(markerDir, {
       timestamp: new Date().toISOString(),
       tool: toolName,
       file: filePath,
       verdict: "error",
-      reason: err instanceof Error ? err.message : String(err),
-      durationMs: Date.now() - startedAt,
+      reason,
+      durationMs,
     });
+    await emitSystemMessage(
+      `codex-pair ERROR: ${filePath} — review failed: ${reason} (${formatDuration(durationMs)})`,
+    );
     process.exit(0);
   }
 
   const concerns = parseConcerns(response);
   const total = concerns.high.length + concerns.med.length + concerns.low.length;
+  const durationMs = Date.now() - startedAt;
 
   await appendLog(markerDir, {
     timestamp: new Date().toISOString(),
@@ -368,7 +408,7 @@ async function main() {
       med: concerns.med.length,
       low: concerns.low.length,
     },
-    durationMs: Date.now() - startedAt,
+    durationMs,
     concerns: {
       high: concerns.high.map((c) => c.slice(0, 800)),
       med: concerns.med.map((c) => c.slice(0, 800)),
@@ -376,13 +416,7 @@ async function main() {
     },
   });
 
-  const surfaced = [
-    ...concerns.high.map((c) => `[HIGH] ${c}`),
-    ...concerns.med.map((c) => `[MED] ${c}`),
-  ];
-  if (surfaced.length > 0) {
-    process.stderr.write(`[codex-pair] ${filePath}\n${surfaced.join("\n\n")}\n`);
-  }
+  await emitSystemMessage(buildVerdictMessage({ filePath, concerns, fellBack, durationMs }));
 
   process.exit(0);
 }

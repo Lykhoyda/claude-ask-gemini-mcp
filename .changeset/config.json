@@ -10,7 +10,7 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@ask-llm/plugin"],
+  "ignore": [],
   "privatePackages": {
     "version": true,
     "tag": false

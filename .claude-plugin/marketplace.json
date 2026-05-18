@@ -17,14 +17,22 @@
         "path": "packages/claude-plugin"
       },
       "description": "AI-to-AI collaboration — review code, brainstorm ideas, and debate plans across Gemini, Codex, and Ollama providers",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "author": {
         "name": "Anton Lykhoyda"
       },
       "homepage": "https://lykhoyda.github.io/ask-llm/plugin/overview",
       "repository": "https://github.com/Lykhoyda/ask-llm",
       "license": "MIT",
-      "keywords": ["ai", "gemini", "codex", "ollama", "mcp", "code-review", "brainstorm"],
+      "keywords": [
+        "ai",
+        "gemini",
+        "codex",
+        "ollama",
+        "mcp",
+        "code-review",
+        "brainstorm"
+      ],
       "category": "external-integrations"
     }
   ]
