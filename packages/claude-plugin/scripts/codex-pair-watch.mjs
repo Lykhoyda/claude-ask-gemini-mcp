@@ -85,6 +85,15 @@ const CACHE_DIR = ".codex-pair-cache";
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 50;
 
+// Marker-walk anchor for the unhandled-exception catch handler. main() sets
+// this to `dirname(filePath)` once the payload is validated; the catch
+// handler at the bottom of the file reads it to write diagnostics into the
+// correct repo's log (the edited file's repo, not cwd's). If main() throws
+// before payload parsing, this stays null and the catch falls back to cwd.
+// See multi-review feedback on PR #76 — both Gemini and Codex flagged the
+// previous cwd-only catch path as a residual cross-repo gap.
+let markerAnchor = null;
+
 // Closed verdict set. Every log entry's `verdict` field is one of these
 // strings. `systemMessage` prefixes mirror via VERDICT_PREFIXES so the user
 // can distinguish at a glance: OK (none), WARN (concerns), SKIP (intentional
@@ -883,8 +892,10 @@ async function main() {
   // siblings), cwd-anchored resolution writes logs to the wrong repo. The
   // file_path is always absolute per Claude Code's tool_input contract, so
   // its dirname is a reliable anchor that matches the edit's actual project.
-  // See issue #65.
-  const markerPath = await findMarkerUp(dirname(filePath));
+  // See issue #65. Also hoisted to module scope so the catch handler can
+  // log unhandled exceptions to the correct repo without re-parsing stdin.
+  markerAnchor = dirname(filePath);
+  const markerPath = await findMarkerUp(markerAnchor);
   if (!markerPath) process.exit(0);
   const markerDir = dirname(markerPath);
 
@@ -1107,7 +1118,14 @@ async function main() {
 
 main().catch(async (err) => {
   try {
-    const markerPath = await findMarkerUp(process.cwd());
+    // Prefer the hoisted markerAnchor (set from dirname(filePath) once the
+    // payload was validated) so unhandled-exception logs land in the edited
+    // file's repo, not cwd's. Falls back to cwd only when main() threw
+    // before payload parsing — the unavoidable case where filePath is
+    // unknown. Multi-review on PR #76 flagged the prior cwd-only path as a
+    // residual cross-repo gap; this hoist closes it.
+    const anchor = markerAnchor ?? process.cwd();
+    const markerPath = await findMarkerUp(anchor);
     if (markerPath) {
       await appendLog(dirname(markerPath), {
         timestamp: new Date().toISOString(),

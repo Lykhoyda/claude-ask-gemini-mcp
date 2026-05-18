@@ -1,5 +1,17 @@
 # @ask-llm/plugin
 
+## 0.6.2
+
+### Patch Changes
+
+- Fix two ≥80-confidence findings from the multi-review on PR [#76](https://github.com/Lykhoyda/ask-llm/issues/76):
+
+  **1. Catch handler now uses hoisted `markerAnchor` instead of `process.cwd()`** (both Gemini and Codex flagged). The unhandled-exception path in `main().catch(...)` previously walked up from `process.cwd()` to find the marker, which undermined the v0.6.1 cross-repo fix for any error that happened AFTER payload parsing. Now: `markerAnchor` is hoisted to module scope; `main()` sets it to `dirname(filePath)` once payload is validated; the catch handler reads `markerAnchor ?? process.cwd()` — using cwd only as a true last resort when `main()` threw before payload parsing.
+
+  **2. Documented Windows compatibility caveat** for the `$PWD` workaround in `apps/docs/plugin/hooks.md`. The `sh -c '...'` form requires a POSIX shell, which Windows users on cmd.exe/PowerShell don't have natively. Added a one-line note pointing Windows users at Git for Windows (which provides `sh` via MINGW64) or recommending an absolute Windows path instead.
+
+  Both fixes are tiny (~5 LOC each), no architectural changes. New structural test pins the catch-handler hoist invariant so a future refactor can't silently regress.
+
 ## 0.6.1
 
 ### Patch Changes

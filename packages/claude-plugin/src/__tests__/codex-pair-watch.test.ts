@@ -64,14 +64,28 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/findMarkerUp/);
     // Walks up via dirname loop (inside findMarkerUp's body)
     expect(script).toMatch(/dirname\(.*current\)/);
-    // main()'s primary marker resolution uses dirname(filePath), not cwd.
-    // Cross-repo edits land logs at the edited file's repo, not the cwd's repo.
+    // main()'s primary marker resolution uses markerAnchor (set from
+    // dirname(filePath)), not cwd. Cross-repo edits land logs at the edited
+    // file's repo.
     const mainBlock = script.match(/async function main\(\)\s*\{[\s\S]*?^\}\s*$/m);
     expect(mainBlock).toBeTruthy();
-    expect(mainBlock?.[0]).toMatch(/findMarkerUp\(dirname\(filePath\)\)/);
+    expect(mainBlock?.[0]).toMatch(/markerAnchor\s*=\s*dirname\(filePath\)/);
+    expect(mainBlock?.[0]).toMatch(/findMarkerUp\(markerAnchor\)/);
     expect(mainBlock?.[0]).not.toMatch(/findMarkerUp\(process\.cwd\(\)\)/);
-    // The main().catch unhandled-exception fallback is allowed to use cwd —
-    // filePath isn't in scope there. So we don't forbid cwd globally.
+  });
+
+  // Multi-review follow-up (v0.6.2): the unhandled-exception catch handler
+  // now uses the hoisted markerAnchor so error logs land in the edited
+  // file's repo, with cwd only as a fallback when main() threw before
+  // payload parsing.
+  it("catch handler uses hoisted markerAnchor (with cwd fallback) for cross-repo error logging", () => {
+    // Module-level let so the catch handler can read after main() sets it
+    expect(script).toMatch(/let\s+markerAnchor\s*=\s*null/);
+    // Catch handler reads markerAnchor with cwd as fallback (nullish coalesce)
+    const catchBlock = script.match(/main\(\)\.catch\([\s\S]*?\}\);\s*$/m);
+    expect(catchBlock).toBeTruthy();
+    expect(catchBlock?.[0]).toMatch(/markerAnchor\s*\?\?\s*process\.cwd\(\)/);
+    expect(catchBlock?.[0]).toMatch(/findMarkerUp\(anchor\)/);
   });
 
   it("respects CODEX_PAIR_DISABLED env var as kill switch", () => {

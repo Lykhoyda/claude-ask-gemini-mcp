@@ -148,7 +148,7 @@ Some Claude Code installations don't auto-invoke plugin-declared PostToolUse hoo
 
 ### Form A — Plugin maintainer (you're working on the ask-llm repo itself)
 
-Point at the local repo source. Always reflects your current branch's working tree, so you're dogfooding the code you're actually writing — and no manual update needed on version bumps:
+Point at the local repo source via `$PWD` so the path resolves to whatever directory Claude Code was launched in (the workspace root). Always reflects your current branch's working tree — no manual update on version bumps, no hardcoded absolute paths to maintain, and the same config works for every contributor regardless of where they cloned the repo:
 
 ```json
 {
@@ -159,7 +159,7 @@ Point at the local repo source. Always reflects your current branch's working tr
         "hooks": [
           {
             "type": "command",
-            "command": "node /absolute/path/to/ask-llm/packages/claude-plugin/scripts/codex-pair-watch.mjs"
+            "command": "sh -c 'node \"$PWD/packages/claude-plugin/scripts/codex-pair-watch.mjs\"'"
           }
         ]
       }
@@ -167,6 +167,10 @@ Point at the local repo source. Always reflects your current branch's working tr
   }
 }
 ```
+
+Caveats:
+- Requires launching Claude Code from the repo root (so `$PWD` resolves there). If you launch from a parent directory the hook silently fails — easy to spot via `node packages/claude-plugin/scripts/codex-pair-log.mjs --latest`.
+- Requires a POSIX shell (`sh`) in `PATH`. macOS, Linux, and WSL have this natively. **Windows users on cmd.exe or PowerShell without Git Bash** should install [Git for Windows](https://gitforwindows.org/) (which provides `sh` via the bundled MINGW64 environment) or use an absolute Windows path instead of `$PWD` in the `command` field.
 
 ### Form B — Plugin user (you installed via marketplace)
 
