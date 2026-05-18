@@ -16,8 +16,19 @@
 // invocation is inlined; semantics mirror `codexExecutor.ts` deliberately.
 
 import { spawn } from "node:child_process";
-import { access, appendFile, readFile, rename, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -49,6 +60,14 @@ const MAX_LOG_ENTRIES = 1000;
 const VALID_THRESHOLDS = new Set(["high", "med", "low"]);
 const DEFAULT_SURFACE_THRESHOLD = "med";
 const QUOTA_SIGNALS = ["rate_limit_exceeded", "quota_exceeded", "429", "insufficient_quota"];
+
+// Cache configuration (item #8). Cache lives at `<markerDir>/.codex-pair-cache/<hash[0:2]>/<rest>.json`.
+// Value: { high, med, low, durationMs }. Keyed on the inputs that
+// deterministically produce a codex review outcome (same prompt + same model
+// = same review). TTL 10 minutes via mtime; LRU eviction at 50 files cap.
+const CACHE_DIR = ".codex-pair-cache";
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 50;
 
 // Closed verdict set. Every log entry's `verdict` field is one of these
 // strings. `systemMessage` prefixes mirror via VERDICT_PREFIXES so the user
@@ -138,17 +157,25 @@ function formatDuration(durationMs) {
 // levels are expanded into the message body. ADR-077 default keeps LOW in the
 // log only (threshold = "med"). The only opt-up is surfaceThreshold = "low";
 // the count summary line always includes LOW so the user knows LOWs exist.
-function buildVerdictMessage({ filePath, concerns, fellBack, durationMs, surfaceThreshold }) {
+function buildVerdictMessage({
+  filePath,
+  concerns,
+  fellBack,
+  durationMs,
+  surfaceThreshold,
+  cached,
+}) {
   const threshold = VALID_THRESHOLDS.has(surfaceThreshold)
     ? surfaceThreshold
     : DEFAULT_SURFACE_THRESHOLD;
   const total = concerns.high.length + concerns.med.length + concerns.low.length;
   const flag = fellBack ? " [fallback model]" : "";
+  const cachedTag = cached ? " [cached]" : "";
   if (total === 0) {
-    return `codex-pair ${VERDICT_PREFIXES.none}${flag}: ${filePath} — no concerns (${formatDuration(durationMs)})`;
+    return `codex-pair ${VERDICT_PREFIXES.none}${flag}${cachedTag}: ${filePath} — no concerns (${formatDuration(durationMs)})`;
   }
   const counts = `${concerns.high.length}H / ${concerns.med.length}M / ${concerns.low.length}L`;
-  const header = `codex-pair ${VERDICT_PREFIXES.concerns}${flag}: ${filePath} — ${counts} (${formatDuration(durationMs)})`;
+  const header = `codex-pair ${VERDICT_PREFIXES.concerns}${flag}${cachedTag}: ${filePath} — ${counts} (${formatDuration(durationMs)})`;
   const details = [];
   // HIGH always surfaces.
   for (const c of concerns.high) details.push(`[HIGH]\n${c}`);
@@ -508,6 +535,95 @@ function parseConcerns(message) {
   return concerns;
 }
 
+// Content-hash cache (item #8). Key = sha256(model + prompt + fileContent +
+// surfaceThreshold). The four inputs together uniquely determine the codex
+// review outcome — same inputs, same review, same concerns. Cache write/read
+// failures are silent no-ops; cache misses fall through to normal codex spawn.
+function computeCacheKey({ model, prompt, fileContent, surfaceThreshold }) {
+  const h = createHash("sha256");
+  h.update(model);
+  h.update("\0");
+  h.update(prompt);
+  h.update("\0");
+  h.update(fileContent);
+  h.update("\0");
+  h.update(surfaceThreshold);
+  return h.digest("hex");
+}
+
+function cachePathFor(markerDir, cacheKey) {
+  return join(markerDir, CACHE_DIR, cacheKey.slice(0, 2), `${cacheKey.slice(2)}.json`);
+}
+
+async function getCachedConcerns(markerDir, cacheKey) {
+  const cachePath = cachePathFor(markerDir, cacheKey);
+  try {
+    const stats = await stat(cachePath);
+    if (Date.now() - stats.mtimeMs > CACHE_TTL_MS) return null;
+    const raw = await readFile(cachePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      !Array.isArray(parsed.high) ||
+      !Array.isArray(parsed.med) ||
+      !Array.isArray(parsed.low)
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function setCachedConcerns(markerDir, cacheKey, value) {
+  const cachePath = cachePathFor(markerDir, cacheKey);
+  try {
+    await mkdir(dirname(cachePath), { recursive: true });
+    await writeFile(cachePath, JSON.stringify(value));
+  } catch {
+    // intentional no-op — cache write failures must never break Claude's flow
+  }
+  await evictCacheOldest(markerDir);
+}
+
+async function evictCacheOldest(markerDir) {
+  try {
+    const cacheRoot = join(markerDir, CACHE_DIR);
+    const entries = [];
+    const prefixes = await readdir(cacheRoot);
+    for (const prefix of prefixes) {
+      let files;
+      try {
+        files = await readdir(join(cacheRoot, prefix));
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        const full = join(cacheRoot, prefix, file);
+        try {
+          const s = await stat(full);
+          entries.push({ path: full, mtimeMs: s.mtimeMs });
+        } catch {
+          // skip unreadable entries
+        }
+      }
+    }
+    if (entries.length <= CACHE_MAX_ENTRIES) return;
+    entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    const drop = entries.slice(0, entries.length - CACHE_MAX_ENTRIES);
+    for (const e of drop) {
+      try {
+        await unlink(e.path);
+      } catch {
+        // skip if already deleted by a concurrent run
+      }
+    }
+  } catch {
+    // intentional no-op — eviction is best-effort
+  }
+}
+
 // Cap log growth: when the file exceeds MAX_LOG_BYTES, keep only the most
 // recent MAX_LOG_ENTRIES lines via tmp-write + atomic rename. Rotation
 // failures must NEVER break Claude's flow — silent return on any error.
@@ -797,6 +913,49 @@ async function main() {
   });
 
   const startedAt = Date.now();
+
+  // Content-hash cache check (item #8). Same inputs → same review → skip the
+  // codex spawn entirely on hit. Cache miss falls through to normal flow.
+  const cacheKey = computeCacheKey({
+    model: config.model,
+    prompt,
+    fileContent: promptContent,
+    surfaceThreshold: config.surfaceThreshold,
+  });
+  const cached = await getCachedConcerns(markerDir, cacheKey);
+  if (cached) {
+    const cachedDurationMs = Date.now() - startedAt;
+    await appendLog(markerDir, {
+      timestamp: new Date().toISOString(),
+      tool: toolName,
+      file: filePath,
+      verdict: "cached",
+      counts: {
+        high: cached.high.length,
+        med: cached.med.length,
+        low: cached.low.length,
+      },
+      durationMs: cachedDurationMs,
+      originalDurationMs: cached.durationMs,
+      concerns: {
+        high: cached.high.map((c) => c.slice(0, 800)),
+        med: cached.med.map((c) => c.slice(0, 800)),
+        low: cached.low.map((c) => c.slice(0, 800)),
+      },
+    });
+    await emitSystemMessage(
+      buildVerdictMessage({
+        filePath,
+        concerns: cached,
+        fellBack: false,
+        durationMs: cachedDurationMs,
+        surfaceThreshold: config.surfaceThreshold,
+        cached: true,
+      }),
+    );
+    process.exit(0);
+  }
+
   let response;
   let fellBack = false;
   try {
@@ -830,6 +989,15 @@ async function main() {
   const concerns = parseConcerns(response);
   const total = concerns.high.length + concerns.med.length + concerns.low.length;
   const durationMs = Date.now() - startedAt;
+
+  // Cache the parsed concerns for future identical-input calls. Failures here
+  // are silent — a write failure shouldn't break the user-visible review.
+  await setCachedConcerns(markerDir, cacheKey, {
+    high: concerns.high,
+    med: concerns.med,
+    low: concerns.low,
+    durationMs,
+  });
 
   await appendLog(markerDir, {
     timestamp: new Date().toISOString(),

@@ -126,7 +126,7 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     // The main() catch resolves verdict via verdictFromError and looks up prefix.
     expect(script).toMatch(/verdictFromError/);
     // buildVerdictMessage routes both OK and WARN through the table
-    const verdictMsgBlock = script.match(/function buildVerdictMessage[\s\S]*?^}/m);
+    const verdictMsgBlock = script.match(/function buildVerdictMessage[\s\S]*?^\}\s*$/m);
     expect(verdictMsgBlock).toBeTruthy();
     expect(verdictMsgBlock?.[0]).toMatch(/VERDICT_PREFIXES\.none/);
     expect(verdictMsgBlock?.[0]).toMatch(/VERDICT_PREFIXES\.concerns/);
@@ -142,7 +142,7 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
   });
 
   it("buildVerdictMessage gates LOW behind surfaceThreshold === 'low' (ADR-077 opt-up)", () => {
-    const verdictBlock = script.match(/function buildVerdictMessage[\s\S]*?^}/m);
+    const verdictBlock = script.match(/function buildVerdictMessage[\s\S]*?^\}\s*$/m);
     expect(verdictBlock).toBeTruthy();
     const body = verdictBlock?.[0] ?? "";
     // HIGH must surface unconditionally (no threshold check around it)
@@ -299,6 +299,69 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(body).toMatch(/return null/);
   });
 
+  // Phase 3 item #8: content-hash cache
+  it("declares cache config (.codex-pair-cache dir, 10min TTL, 50-entry cap)", () => {
+    expect(script).toMatch(/CACHE_DIR\s*=\s*["']\.codex-pair-cache["']/);
+    expect(script).toMatch(/CACHE_TTL_MS\s*=\s*10\s*\*\s*60\s*\*\s*1000/);
+    expect(script).toMatch(/CACHE_MAX_ENTRIES\s*=\s*50/);
+  });
+
+  it("cache key includes model + prompt + fileContent + surfaceThreshold (the four invalidation inputs)", () => {
+    const block = script.match(/function computeCacheKey[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    expect(body).toMatch(/createHash\(["']sha256["']\)/);
+    expect(body).toMatch(/\.update\(model\)/);
+    expect(body).toMatch(/\.update\(prompt\)/);
+    expect(body).toMatch(/\.update\(fileContent\)/);
+    expect(body).toMatch(/\.update\(surfaceThreshold\)/);
+    expect(body).toMatch(/digest\(["']hex["']\)/);
+  });
+
+  it("cache path layout uses 2-char prefix sharding", () => {
+    const block = script.match(/function cachePathFor[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    expect(body).toMatch(/cacheKey\.slice\(0,\s*2\)/);
+    expect(body).toMatch(/cacheKey\.slice\(2\)/);
+  });
+
+  it("getCachedConcerns enforces mtime-based TTL", () => {
+    const block = script.match(/async function getCachedConcerns[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    expect(body).toMatch(/mtimeMs/);
+    expect(body).toMatch(/CACHE_TTL_MS/);
+  });
+
+  it("evictCacheOldest sorts by mtime and unlinks the excess", () => {
+    const block = script.match(/async function evictCacheOldest[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    expect(body).toMatch(/sort\(\(a,\s*b\)\s*=>\s*a\.mtimeMs\s*-\s*b\.mtimeMs\)/);
+    expect(body).toMatch(/CACHE_MAX_ENTRIES/);
+    expect(body).toMatch(/unlink/);
+  });
+
+  it("main() checks cache before codex spawn; hit emits [cached] tag, miss writes after success", () => {
+    // Cache check before runCodexWithFallback
+    expect(script).toMatch(/computeCacheKey[\s\S]*?getCachedConcerns[\s\S]*?runCodexWithFallback/);
+    // verdict on hit
+    expect(script).toMatch(/verdict:\s*["']cached["']/);
+    // buildVerdictMessage gets cached:true on hit
+    expect(script).toMatch(/cached:\s*true/);
+    // Write after successful parse
+    expect(script).toMatch(/setCachedConcerns/);
+  });
+
+  it("buildVerdictMessage emits [cached] suffix when cached:true", () => {
+    const block = script.match(/function buildVerdictMessage[\s\S]*?^\}\s*$/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    expect(body).toMatch(/cachedTag/);
+    expect(body).toMatch(/["']\s*\[cached\]\s*["']/);
+  });
+
   it("main() invokes ignore-check between SKIP_PATTERNS and frontmatter parse, no systemMessage on match", () => {
     // Pin the call sequence — ignore-check comes after SKIP_PATTERNS but
     // before the marker-file read/parse.
@@ -408,7 +471,7 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/emitSystemMessage/);
     expect(script).toMatch(/systemMessage/);
 
-    const verdictBlock = script.match(/function buildVerdictMessage[\s\S]*?^}/m);
+    const verdictBlock = script.match(/function buildVerdictMessage[\s\S]*?^\}\s*$/m);
     expect(verdictBlock).toBeTruthy();
     expect(verdictBlock?.[0]).toMatch(/concerns\.high.*HIGH/s);
     expect(verdictBlock?.[0]).toMatch(/concerns\.med.*MED/s);
