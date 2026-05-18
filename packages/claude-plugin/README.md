@@ -33,7 +33,8 @@ claude mcp add --scope user ollama -- npx -y ask-ollama-mcp
 |---------|-------------|
 | `/multi-review` | Parallel Gemini + Codex review with 4-phase validation pipeline and consensus highlighting |
 | `/gemini-review` | Gemini-only code review with confidence filtering |
-| `/codex-review` | Codex-only code review |
+| `/codex-review` | Codex-only code review (precision-first, ≥80 confidence — default for routine PR review) |
+| `/codex-pair` | **Recall-first** continuous review via PostToolUse hook — opt-in per project via `.codex-pair-context.md` marker file. Complement to `/codex-review` for money/security/spec-implementing code (see [ADR-077](../../docs/DECISIONS.md)) |
 | `/ollama-review` | Local review — no data leaves your machine |
 | `/brainstorm` | Multi-LLM brainstorm with Claude Opus as a first-class research participant (default external: gemini,codex) |
 | `/brainstorm-all` | Brainstorm with all three external providers + Claude Opus research |
@@ -52,7 +53,41 @@ claude mcp add --scope user ollama -- npx -y ask-ollama-mcp
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| PreToolUse | Before `git commit` | Reviews staged changes, warns about critical issues |
+| PreToolUse | Before `git commit` | Reviews staged changes via Gemini, warns about critical issues |
+| PostToolUse | After Edit/Write/MultiEdit | Runs codex-pair review IF `.codex-pair-context.md` marker file is present in the project (opt-in, ADR-077) |
+
+## Enabling codex-pair mode
+
+The `codex-pair` hook is loaded by default but **self-gates on a marker file**. Without the marker, every edit triggers one `fs.access()` call and exits — zero codex calls, zero cost.
+
+To enable for a project:
+
+```bash
+cat > .codex-pair-context.md <<'EOF'
+# .codex-pair-context.md
+
+This is a payment-processing service. Currency must use integer cents
+(floats lose precision on every charge). Concurrent requests are real.
+URL inputs are untrusted.
+
+[Add deployment shape, stated requirements, or threat surface the
+reviewer should know.]
+EOF
+```
+
+Once present, every Edit/Write/MultiEdit triggers a Codex review of the file with the marker's content as project context. HIGH and MED concerns appear to Claude as system reminders on the next turn; LOW concerns are logged to `.codex-pair-log.jsonl` but suppressed from surfacing.
+
+To disable:
+
+| Goal | Mechanism |
+|---|---|
+| Permanently for this project | `rm .codex-pair-context.md` |
+| Just this session | `/plugin disable ask-llm` |
+| Just this command | `CODEX_PAIR_DISABLED=1 <command>` |
+
+**Cost characteristics**: ~$0.04–0.07 per file reviewed (gpt-5.5), ~13–50s per file. Files >20KB skipped (override with `CODEX_PAIR_MAX_FILE_BYTES`). node_modules/dist/lockfiles/images skipped automatically.
+
+**When to enable**: money handling, security-sensitive paths, code implementing a written spec, concurrent state management. **When NOT to enable**: routine refactors, glue code, simple CRUD — `/codex-review` is sufficient at 1/4 the cost. The four-task benchmark in ADR-077 has the full evidence trail.
 
 ## Requirements
 

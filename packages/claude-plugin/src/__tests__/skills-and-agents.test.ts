@@ -5,6 +5,7 @@ const expectedSkills = [
   "brainstorm",
   "brainstorm-all",
   "codex-image",
+  "codex-pair",
   "codex-review",
   "codex-verify",
   "compare",
