@@ -16,31 +16,93 @@
 // invocation is inlined; semantics mirror `codexExecutor.ts` deliberately.
 
 import { spawn } from "node:child_process";
-import { access, appendFile, readFile } from "node:fs/promises";
+import { access, appendFile, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const DEFAULTS_PATH = join(SCRIPT_DIR, "..", "codex-pair-defaults.json");
+
+// codex-pair-defaults.json carries the canonical default + fallback model
+// names so the hook stays in sync with codex-mcp/src/constants.ts:MODELS
+// without duplicating literals across files. A structural test links the
+// JSON values to constants.ts so drift fails CI. If the file is missing or
+// malformed, fall through to env vars and hardcoded literals.
+let CODEX_PAIR_DEFAULTS = { model: "gpt-5.5", fallbackModel: "gpt-5.5-mini" };
+try {
+  CODEX_PAIR_DEFAULTS = JSON.parse(readFileSync(DEFAULTS_PATH, "utf8"));
+} catch {
+  // intentional fallback to inline defaults
+}
 
 const MARKER_FILE = ".codex-pair-context.md";
 const WATCHED_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
 const LOG_FILENAME = ".codex-pair-log.jsonl";
-const DEFAULT_MODEL = process.env.ASK_CODEX_MODEL ?? "gpt-5.5";
-const FALLBACK_MODEL = process.env.ASK_CODEX_FALLBACK_MODEL ?? "gpt-5.5-mini";
+const DEFAULT_MODEL = process.env.ASK_CODEX_MODEL ?? CODEX_PAIR_DEFAULTS.model;
+const FALLBACK_MODEL = process.env.ASK_CODEX_FALLBACK_MODEL ?? CODEX_PAIR_DEFAULTS.fallbackModel;
 const DEFAULT_TIMEOUT_MS = Number(process.env.ASK_CODEX_TIMEOUT_MS ?? 800_000);
 const MAX_FILE_BYTES = Number(process.env.CODEX_PAIR_MAX_FILE_BYTES ?? 20_000);
+const MAX_LOG_BYTES = Number(process.env.CODEX_PAIR_MAX_LOG_BYTES ?? 2_000_000);
+const MAX_LOG_ENTRIES = 1000;
 const QUOTA_SIGNALS = ["rate_limit_exceeded", "quota_exceeded", "429", "insufficient_quota"];
 
+// Closed verdict set. Every log entry's `verdict` field is one of these
+// strings. `systemMessage` prefixes mirror via VERDICT_PREFIXES so the user
+// can distinguish at a glance: OK (none), WARN (concerns), SKIP (intentional
+// skip), and the codex-side failure modes TIMEOUT / SPAWN_FAILED /
+// PARSE_FAILED / ERROR. The `cached` verdict is reserved for the Phase 3
+// response cache and unused today.
+const VERDICT_PREFIXES = {
+  none: "OK",
+  concerns: "WARN",
+  skipped: "SKIP",
+  error: "ERROR",
+  spawn_failed: "SPAWN_FAILED",
+  timeout: "TIMEOUT",
+  parse_failed: "PARSE_FAILED",
+  cached: "CACHED",
+};
+
 const SKIP_PATTERNS = [
+  // Path patterns — leading/trailing slash guards against substring matches
   "/node_modules/",
   "/dist/",
   "/.git/",
+  // Lockfiles by exact filename
   "yarn.lock",
   "package-lock.json",
+  "pnpm-lock.yaml",
+  "Cargo.lock",
+  "Gemfile.lock",
+  "composer.lock",
+  "poetry.lock",
+  "go.sum",
+  // Images
   ".png",
   ".jpg",
   ".jpeg",
   ".gif",
   ".svg",
   ".ico",
+  // Fonts
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".otf",
+  ".eot",
+  // Documents + archives
+  ".pdf",
+  ".zip",
+  ".tar",
+  ".gz",
+  // Snapshots, sourcemaps, minified assets
+  ".snap",
+  ".map",
+  ".min.js",
+  ".min.css",
+  // Generic .lock catch-all (matches anything ending in .lock)
   ".lock",
 ];
 
@@ -74,10 +136,10 @@ function buildVerdictMessage({ filePath, concerns, fellBack, durationMs }) {
   const total = concerns.high.length + concerns.med.length + concerns.low.length;
   const flag = fellBack ? " [fallback model]" : "";
   if (total === 0) {
-    return `codex-pair OK${flag}: ${filePath} — no concerns (${formatDuration(durationMs)})`;
+    return `codex-pair ${VERDICT_PREFIXES.none}${flag}: ${filePath} — no concerns (${formatDuration(durationMs)})`;
   }
   const counts = `${concerns.high.length}H / ${concerns.med.length}M / ${concerns.low.length}L`;
-  const header = `codex-pair WARN${flag}: ${filePath} — ${counts} (${formatDuration(durationMs)})`;
+  const header = `codex-pair ${VERDICT_PREFIXES.concerns}${flag}: ${filePath} — ${counts} (${formatDuration(durationMs)})`;
   const details = [
     ...concerns.high.map((c) => `[HIGH]\n${c}`),
     ...concerns.med.map((c) => `[MED]\n${c}`),
@@ -176,12 +238,34 @@ function parseConcerns(message) {
   return concerns;
 }
 
-async function appendLog(markerDir, entry) {
+// Cap log growth: when the file exceeds MAX_LOG_BYTES, keep only the most
+// recent MAX_LOG_ENTRIES lines via tmp-write + atomic rename. Rotation
+// failures must NEVER break Claude's flow — silent return on any error.
+async function rotateLogIfNeeded(logPath) {
   try {
-    await appendFile(join(markerDir, LOG_FILENAME), JSON.stringify(entry) + "\n");
+    const stats = await stat(logPath);
+    if (stats.size <= MAX_LOG_BYTES) return;
+    const content = await readFile(logPath, "utf8");
+    const lines = content.split("\n").filter((l) => l.length > 0);
+    if (lines.length <= MAX_LOG_ENTRIES) return;
+    const tail = lines.slice(-MAX_LOG_ENTRIES);
+    const tmpPath = `${logPath}.tmp`;
+    await writeFile(tmpPath, `${tail.join("\n")}\n`);
+    await rename(tmpPath, logPath);
+  } catch {
+    // intentional no-op — rotation is best-effort
+  }
+}
+
+async function appendLog(markerDir, entry) {
+  const logPath = join(markerDir, LOG_FILENAME);
+  try {
+    await appendFile(logPath, JSON.stringify(entry) + "\n");
   } catch {
     // logging failures must never break Claude's flow
+    return;
   }
+  await rotateLogIfNeeded(logPath);
 }
 
 // Build codex CLI args. Mirrors packages/codex-mcp/src/utils/codexExecutor.ts
@@ -231,6 +315,21 @@ function isQuotaError(err) {
   return QUOTA_SIGNALS.some((sig) => msg.includes(sig));
 }
 
+// Attach a verdict tag to an Error so the main() catch can classify the
+// failure into the closed VERDICT_PREFIXES set without re-parsing the message.
+function taggedError(message, verdict) {
+  const err = new Error(message);
+  err.verdict = verdict;
+  return err;
+}
+
+function verdictFromError(err) {
+  if (err && typeof err === "object" && typeof err.verdict === "string" && err.verdict in VERDICT_PREFIXES) {
+    return err.verdict;
+  }
+  return "error";
+}
+
 // Single codex invocation. The stdio + stdin-end pattern (and the SIGTERM →
 // SIGKILL escalation) mirrors `packages/shared/src/commandExecutor.ts`.
 // Critically: stdin must be "pipe" (not "ignore") and must be ended explicitly,
@@ -267,14 +366,16 @@ function spawnCodex({ prompt, model, timeoutMs }) {
           child.kill("SIGKILL");
         } catch {}
       }, 5000);
-      rejectCall(new Error(`codex exec timed out after ${Math.round(timeoutMs / 1000)}s`));
+      rejectCall(
+        taggedError(`codex exec timed out after ${Math.round(timeoutMs / 1000)}s`, "timeout"),
+      );
     }, timeoutMs);
 
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      rejectCall(new Error(`failed to spawn codex: ${err.message}`));
+      rejectCall(taggedError(`failed to spawn codex: ${err.message}`, "spawn_failed"));
     });
 
     child.on("close", (code) => {
@@ -285,10 +386,11 @@ function spawnCodex({ prompt, model, timeoutMs }) {
         try {
           resolveCall(parseCodexJsonl(stdout));
         } catch (err) {
-          rejectCall(err);
+          const msg = err instanceof Error ? err.message : String(err);
+          rejectCall(taggedError(msg, "parse_failed"));
         }
       } else {
-        rejectCall(new Error(stderr.trim() || `codex exit ${code}`));
+        rejectCall(taggedError(stderr.trim() || `codex exit ${code}`, "error"));
       }
     });
   });
@@ -341,7 +443,9 @@ async function main() {
       verdict: "skipped",
       reason: `unreadable: ${err.message}`,
     });
-    await emitSystemMessage(`codex-pair SKIP: ${filePath} — unreadable (${err.message})`);
+    await emitSystemMessage(
+      `codex-pair ${VERDICT_PREFIXES.skipped}: ${filePath} — unreadable (${err.message})`,
+    );
     process.exit(0);
   }
 
@@ -355,7 +459,7 @@ async function main() {
       reason: `file too large: ${fileBytes} bytes (cap: ${MAX_FILE_BYTES})`,
     });
     await emitSystemMessage(
-      `codex-pair SKIP: ${filePath} — file too large (${fileBytes} bytes, cap ${MAX_FILE_BYTES})`,
+      `codex-pair ${VERDICT_PREFIXES.skipped}: ${filePath} — file too large (${fileBytes} bytes, cap ${MAX_FILE_BYTES})`,
     );
     process.exit(0);
   }
@@ -378,17 +482,19 @@ async function main() {
     fellBack = result.fellBack;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
+    const verdict = verdictFromError(err);
+    const prefix = VERDICT_PREFIXES[verdict] ?? VERDICT_PREFIXES.error;
     const durationMs = Date.now() - startedAt;
     await appendLog(markerDir, {
       timestamp: new Date().toISOString(),
       tool: toolName,
       file: filePath,
-      verdict: "error",
+      verdict,
       reason,
       durationMs,
     });
     await emitSystemMessage(
-      `codex-pair ERROR: ${filePath} — review failed: ${reason} (${formatDuration(durationMs)})`,
+      `codex-pair ${prefix}: ${filePath} — review failed: ${reason} (${formatDuration(durationMs)})`,
     );
     process.exit(0);
   }
