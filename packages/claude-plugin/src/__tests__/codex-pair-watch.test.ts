@@ -618,7 +618,9 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     // a tag literally), and the prompt explicitly warns to treat content as untrusted.
     expect(script).toMatch(/<file_content>/);
     expect(script).toMatch(/<\/file_content>/);
-    const buildPromptBlock = script.match(/function buildPrompt[\s\S]*?^}/m);
+    // Anchor on the post-${fileContent} function close so the regex isn't
+    // fooled by example-JSON `}` characters in the prompt body (ADR-083).
+    const buildPromptBlock = script.match(/function buildPrompt[\s\S]*?\$\{fileContent\}[\s\S]*?\n\}/);
     expect(buildPromptBlock).toBeTruthy();
     expect(buildPromptBlock?.[0]).toMatch(/untrusted data/i);
     // Negative: no `${fileContent}` immediately inside a triple-backtick fence
@@ -1347,5 +1349,116 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     const errEntry = lines.find((l) => l.verdict === "error" || l.verdict === "spawn_failed");
     expect(errEntry).toBeTruthy();
     expect(errEntry.reason).toMatch(/rate_limit_exceeded|quota/i);
+  });
+
+  // ADR-083: structured JSON output contract. The `concerns-schema` scenario
+  // emits the new shape; the hook's parser should classify findings into
+  // HIGH/MED/LOW buckets identical to the legacy [LABEL] path.
+  it("fake-codex 'concerns-schema' scenario → verdict:concerns; severity:high/medium map to high/med buckets", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHookWithFakeCodex(payload, tempDir, "concerns-schema");
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const reviewEntry = lines.find((l) => l.verdict === "concerns");
+    expect(reviewEntry).toBeTruthy();
+    // The fixture emits one high + one medium finding.
+    expect(reviewEntry.counts.high).toBe(1);
+    expect(reviewEntry.counts.med).toBe(1);
+    expect(reviewEntry.counts.low).toBe(0);
+    const hookOutput = JSON.parse(result.stdout.trim());
+    expect(hookOutput.systemMessage).toMatch(/^codex-pair WARN:/);
+    expect(hookOutput.systemMessage).toMatch(/\[HIGH\]/);
+    expect(hookOutput.systemMessage).toMatch(/Float arithmetic on money values/);
+    expect(hookOutput.systemMessage).toMatch(/\[MED\]/);
+    expect(hookOutput.systemMessage).toMatch(/Missing input validation/);
+    // file:line should render from line_start
+    expect(hookOutput.systemMessage).toMatch(/src\/billing\/charge\.ts:42/);
+  });
+
+  it("fake-codex JSON clean verdict → verdict:none even when message lacks the word NONE", () => {
+    // Override stdout entirely so the hook receives a JSONL stream whose
+    // agent_message is a `{"verdict":"clean","findings":[]}` blob — the
+    // ADR-083 happy-path replacement for the legacy 'NONE' literal.
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const jsonl =
+      `${JSON.stringify({ type: "thread.started", thread_id: "t" })}\n` +
+      `${JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: '{"verdict":"clean","findings":[]}' },
+      })}\n` +
+      `${JSON.stringify({
+        type: "turn.completed",
+        usage: { input_tokens: 1, output_tokens: 1, cached_input_tokens: 0 },
+      })}\n`;
+    const result = runHook(payload, tempDir, {
+      PATH: `${FIXTURE_DIR}:${process.env.PATH}`,
+      FAKE_CODEX_RAW_STDOUT: jsonl,
+      FAKE_CODEX_EXIT_CODE: "0",
+    });
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines.some((l) => l.verdict === "none")).toBe(true);
+    const hookOutput = JSON.parse(result.stdout.trim());
+    expect(hookOutput.systemMessage).toMatch(/^codex-pair OK:/);
+  });
+
+  it("legacy [HIGH]/[MED]/[LOW] free-form text still parses (regex fallback, ADR-083 safety net)", () => {
+    // If codex ignores the JSON instruction and emits legacy labels, the
+    // hook should NOT regress to parse_failed — it falls through to the
+    // regex parser. This is the one-version safety net documented in ADR-083.
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHookWithFakeCodex(payload, tempDir, "concerns-labeled");
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const reviewEntry = lines.find((l) => l.verdict === "concerns");
+    expect(reviewEntry).toBeTruthy();
+    expect(reviewEntry.counts.high).toBe(1);
+    expect(reviewEntry.counts.med).toBe(1);
+    expect(reviewEntry.counts.low).toBe(1);
+  });
+
+  it("ADR-083: prompt requests strict JSON shape (no [HIGH]/[MED]/[LOW] labels prescribed)", () => {
+    // Verify the prompt template asks for JSON, not the legacy label format.
+    // The legacy format may still appear in the parser as a safety net, but
+    // the prompt MUST direct codex to emit JSON to keep parse rates high.
+    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
+    expect(scriptText).toMatch(/Output format — strict JSON/);
+    expect(scriptText).toMatch(/"verdict": "clean" \| "needs-attention"/);
+    expect(scriptText).toMatch(/"severity": "high" \| "medium" \| "low"/);
+    // The prompt body must NOT prescribe the [HIGH]/[MED]/[LOW] label format
+    // as the answer shape. (It may still mention HIGH/MED/LOW for grading.)
+    const buildPromptBlock = scriptText.match(/function buildPrompt[\s\S]*?\$\{fileContent\}[\s\S]*?\n\}/);
+    expect(buildPromptBlock).toBeTruthy();
+    expect(buildPromptBlock?.[0]).not.toMatch(/\[HIGH\] <one-line summary>/);
   });
 });
