@@ -1,0 +1,4 @@
+{
+  "model": "gpt-5.5",
+  "fallbackModel": "gpt-5.5-mini"
+}

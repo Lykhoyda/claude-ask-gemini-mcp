@@ -79,6 +79,131 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/WATCHED_TOOLS.*Edit.*Write.*MultiEdit/s);
   });
 
+  // Phase 1 item #1: log rotation
+  it("caps log growth via CODEX_PAIR_MAX_LOG_BYTES env var (default 2_000_000) and MAX_LOG_ENTRIES", () => {
+    expect(script).toMatch(/CODEX_PAIR_MAX_LOG_BYTES/);
+    expect(script).toMatch(/2_000_000|2000000/);
+    expect(script).toMatch(/MAX_LOG_ENTRIES/);
+    expect(script).toMatch(/rotateLogIfNeeded/);
+    // atomic rewrite pattern: writeFile to .tmp, then rename
+    expect(script).toMatch(/writeFile.*\.tmp/s);
+    expect(script).toMatch(/rename\(/);
+  });
+
+  it("rotation failures must never throw — wrapped in try/catch with silent no-op", () => {
+    const rotateBlock = script.match(/async function rotateLogIfNeeded[\s\S]*?^}/m);
+    expect(rotateBlock).toBeTruthy();
+    expect(rotateBlock?.[0]).toMatch(/try\s*\{/);
+    expect(rotateBlock?.[0]).toMatch(/catch\s*\{/);
+  });
+
+  // Phase 1 item #2: structured verdicts
+  it("declares the closed verdict set via VERDICT_PREFIXES table", () => {
+    const tableBlock = script.match(/const VERDICT_PREFIXES\s*=\s*\{[\s\S]*?\};/);
+    expect(tableBlock).toBeTruthy();
+    const t = tableBlock?.[0] ?? "";
+    expect(t).toMatch(/none:\s*["']OK["']/);
+    expect(t).toMatch(/concerns:\s*["']WARN["']/);
+    expect(t).toMatch(/skipped:\s*["']SKIP["']/);
+    expect(t).toMatch(/error:\s*["']ERROR["']/);
+    expect(t).toMatch(/spawn_failed:\s*["']SPAWN_FAILED["']/);
+    expect(t).toMatch(/timeout:\s*["']TIMEOUT["']/);
+    expect(t).toMatch(/parse_failed:\s*["']PARSE_FAILED["']/);
+    expect(t).toMatch(/cached:\s*["']CACHED["']/);
+  });
+
+  it("tags spawnCodex rejections with verdict metadata (taggedError)", () => {
+    expect(script).toMatch(/function taggedError/);
+    expect(script).toMatch(/err\.verdict\s*=/);
+    // each rejection inside spawnCodex carries a verdict
+    expect(script).toMatch(/taggedError\([^,]+,\s*["']timeout["']\)/);
+    expect(script).toMatch(/taggedError\([^,]+,\s*["']spawn_failed["']\)/);
+    expect(script).toMatch(/taggedError\([^,]+,\s*["']parse_failed["']\)/);
+    expect(script).toMatch(/taggedError\([^,]+,\s*["']error["']\)/);
+  });
+
+  it("systemMessage prefix is derived from VERDICT_PREFIXES, not hardcoded ERROR", () => {
+    // The main() catch resolves verdict via verdictFromError and looks up prefix.
+    expect(script).toMatch(/verdictFromError/);
+    // buildVerdictMessage routes both OK and WARN through the table
+    const verdictMsgBlock = script.match(/function buildVerdictMessage[\s\S]*?^}/m);
+    expect(verdictMsgBlock).toBeTruthy();
+    expect(verdictMsgBlock?.[0]).toMatch(/VERDICT_PREFIXES\.none/);
+    expect(verdictMsgBlock?.[0]).toMatch(/VERDICT_PREFIXES\.concerns/);
+  });
+
+  // Phase 1 item #3: expanded skip patterns
+  it("skips font files, archives, sourcemaps, snapshots, minified assets, and additional lockfiles", () => {
+    // Fonts
+    expect(script).toMatch(/["']\.woff["']/);
+    expect(script).toMatch(/["']\.woff2["']/);
+    expect(script).toMatch(/["']\.ttf["']/);
+    expect(script).toMatch(/["']\.otf["']/);
+    expect(script).toMatch(/["']\.eot["']/);
+    // Docs + archives
+    expect(script).toMatch(/["']\.pdf["']/);
+    expect(script).toMatch(/["']\.zip["']/);
+    expect(script).toMatch(/["']\.tar["']/);
+    expect(script).toMatch(/["']\.gz["']/);
+    // Snapshots, sourcemaps, minified
+    expect(script).toMatch(/["']\.snap["']/);
+    expect(script).toMatch(/["']\.map["']/);
+    expect(script).toMatch(/["']\.min\.js["']/);
+    expect(script).toMatch(/["']\.min\.css["']/);
+    // Additional lockfiles
+    expect(script).toMatch(/["']pnpm-lock\.yaml["']/);
+    expect(script).toMatch(/["']Cargo\.lock["']/);
+    expect(script).toMatch(/["']Gemfile\.lock["']/);
+    expect(script).toMatch(/["']composer\.lock["']/);
+    expect(script).toMatch(/["']poetry\.lock["']/);
+    expect(script).toMatch(/["']go\.sum["']/);
+  });
+
+  // Phase 1 item #4: default-model drift guard
+  it("loads model defaults from codex-pair-defaults.json with env + literal fallback", () => {
+    expect(script).toMatch(/codex-pair-defaults\.json/);
+    expect(script).toMatch(/CODEX_PAIR_DEFAULTS/);
+    expect(script).toMatch(/readFileSync/);
+    // Path is resolved from import.meta.url, not cwd
+    expect(script).toMatch(/fileURLToPath\(import\.meta\.url\)/);
+    // DEFAULT_MODEL: env > JSON > inline fallback
+    expect(script).toMatch(/DEFAULT_MODEL\s*=\s*process\.env\.ASK_CODEX_MODEL\s*\?\?\s*CODEX_PAIR_DEFAULTS\.model/);
+    expect(script).toMatch(
+      /FALLBACK_MODEL\s*=\s*process\.env\.ASK_CODEX_FALLBACK_MODEL\s*\?\?\s*CODEX_PAIR_DEFAULTS\.fallbackModel/,
+    );
+  });
+
+  it("codex-pair-defaults.json exists and contains model+fallbackModel keys", () => {
+    const defaultsPath = path.join(PLUGIN_ROOT, "codex-pair-defaults.json");
+    expect(fs.existsSync(defaultsPath)).toBe(true);
+    const defaults = JSON.parse(fs.readFileSync(defaultsPath, "utf-8"));
+    expect(typeof defaults.model).toBe("string");
+    expect(typeof defaults.fallbackModel).toBe("string");
+    expect(defaults.model.length).toBeGreaterThan(0);
+    expect(defaults.fallbackModel.length).toBeGreaterThan(0);
+  });
+
+  it("codex-pair-defaults.json values match codex-mcp constants.ts MODELS (drift guard)", () => {
+    // The hook intentionally mirrors codex-mcp's central model constants without
+    // workspace-importing them. This test links the two so a future bump to
+    // codex-mcp's MODELS.DEFAULT without also updating the JSON fails CI.
+    const defaultsPath = path.join(PLUGIN_ROOT, "codex-pair-defaults.json");
+    const defaults = JSON.parse(fs.readFileSync(defaultsPath, "utf-8"));
+
+    const constantsPath = path.join(PLUGIN_ROOT, "..", "codex-mcp", "src", "constants.ts");
+    const constantsSource = fs.readFileSync(constantsPath, "utf-8");
+
+    const defaultMatch = constantsSource.match(/DEFAULT:\s*process\.env\.ASK_CODEX_MODEL\s*\|\|\s*"([^"]+)"/);
+    const fallbackMatch = constantsSource.match(
+      /FALLBACK:\s*process\.env\.ASK_CODEX_FALLBACK_MODEL\s*\|\|\s*"([^"]+)"/,
+    );
+
+    expect(defaultMatch).toBeTruthy();
+    expect(fallbackMatch).toBeTruthy();
+    expect(defaults.model).toBe(defaultMatch?.[1]);
+    expect(defaults.fallbackModel).toBe(fallbackMatch?.[1]);
+  });
+
   it("skips node_modules, dist, .git, lockfiles, and common image assets", () => {
     expect(script).toMatch(/node_modules/);
     expect(script).toMatch(/\/dist\//);
@@ -308,5 +433,77 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     // Log should land alongside the marker (at tempDir), not at the subdir
     const expectedLogPath = path.join(tempDir, ".codex-pair-log.jsonl");
     expect(fs.existsSync(expectedLogPath)).toBe(true);
+  });
+
+  // Phase 1 item #1 — runtime: log rotation triggers when the file exceeds the cap.
+  it("rotates the log when size exceeds CODEX_PAIR_MAX_LOG_BYTES", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# test context");
+    const logPath = path.join(tempDir, ".codex-pair-log.jsonl");
+    // Seed the log with 1500 fake entries (well above the 1000-entry cap).
+    const fakeEntries: string[] = [];
+    for (let i = 0; i < 1500; i++) {
+      fakeEntries.push(JSON.stringify({ seq: i, verdict: "none", file: `seed-${i}.ts` }));
+    }
+    fs.writeFileSync(logPath, `${fakeEntries.join("\n")}\n`);
+    const sizeBefore = fs.statSync(logPath).size;
+
+    // Trigger ONE more log write via the unreadable-file path — that appendLog
+    // call should observe the over-cap state and rotate to the last 1000 lines.
+    const missingPath = path.join(tempDir, "does-not-exist.ts");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: missingPath },
+    });
+    const result = runHook(payload, tempDir, { CODEX_PAIR_MAX_LOG_BYTES: "10000" });
+    expect(result.status).toBe(0);
+
+    const sizeAfter = fs.statSync(logPath).size;
+    expect(sizeAfter).toBeLessThan(sizeBefore);
+
+    // Verify the rotation kept the tail: highest seq survives, lowest is gone.
+    const linesAfter = fs.readFileSync(logPath, "utf-8").trim().split("\n");
+    // 1500 originals + 1 appended skip entry = 1501; trimmed to 1000.
+    expect(linesAfter.length).toBeLessThanOrEqual(1000);
+    // The MOST RECENT seed entry (1499) should survive
+    const survived = linesAfter.some((line) => {
+      try {
+        const obj = JSON.parse(line);
+        return obj.seq === 1499;
+      } catch {
+        return false;
+      }
+    });
+    expect(survived).toBe(true);
+    // The OLDEST seed entry (0) should have been dropped
+    const oldestSurvived = linesAfter.some((line) => {
+      try {
+        const obj = JSON.parse(line);
+        return obj.seq === 0;
+      } catch {
+        return false;
+      }
+    });
+    expect(oldestSurvived).toBe(false);
+    // No stale .tmp file left behind
+    expect(fs.existsSync(`${logPath}.tmp`)).toBe(false);
+  });
+
+  // Phase 1 item #2 — runtime: structured verdict appears in both log + systemMessage.
+  it("structured verdict appears in log AND in systemMessage prefix", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# test context");
+    const missingPath = path.join(tempDir, "does-not-exist.ts");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: missingPath },
+    });
+    const result = runHook(payload, tempDir);
+    expect(result.status).toBe(0);
+
+    const logEntry = JSON.parse(fs.readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8").trim());
+    expect(logEntry.verdict).toBe("skipped");
+
+    const hookOutput = JSON.parse(result.stdout.trim());
+    // Prefix in systemMessage matches the verdict via VERDICT_PREFIXES.skipped = "SKIP"
+    expect(hookOutput.systemMessage).toMatch(/^codex-pair SKIP:/);
   });
 });
