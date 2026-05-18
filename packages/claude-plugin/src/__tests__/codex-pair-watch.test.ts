@@ -196,6 +196,63 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/falling back to defaults/i);
   });
 
+  // Phase 2 item #6: adaptive context at file-size boundary
+  it("buildAdaptiveContext + runGitDiff helpers exist with 5s git timeout", () => {
+    expect(script).toMatch(/async function buildAdaptiveContext/);
+    expect(script).toMatch(/function runGitDiff/);
+    // git diff -U20 HEAD -- <file>
+    expect(script).toMatch(/spawn\(\s*["']git["'],\s*\[["']diff["']/);
+    expect(script).toMatch(/-U\$\{contextLines\}/);
+    expect(script).toMatch(/HEAD/);
+    // 5s timeout for the git diff call (per the goal command spec)
+    expect(script).toMatch(/timeoutMs:\s*5000/);
+  });
+
+  it("buildAdaptiveContext has three strategies (diff / head-tail / truncated)", () => {
+    const block = script.match(/async function buildAdaptiveContext[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    expect(body).toMatch(/strategy:\s*["']diff["']/);
+    expect(body).toMatch(/strategy:\s*["']head-tail["']/);
+    expect(body).toMatch(/strategy:\s*["']truncated["']/);
+    // Header preview is the first 80 lines per spec
+    expect(body).toMatch(/file_header_first_80_lines/);
+    // Untracked / git-fail fallback uses head-150 + tail-80
+    expect(body).toMatch(/file_head_first_150_lines/);
+    expect(body).toMatch(/file_tail_last_80_lines/);
+  });
+
+  it("main() replaces silent-skip-over-cap with buildAdaptiveContext", () => {
+    // No more `verdict: "skipped"` with "file too large" reason in main().
+    // Instead: an info-level over-cap log entry + buildAdaptiveContext call.
+    expect(script).toMatch(/buildAdaptiveContext\(\s*\{[\s\S]*?fileContent[\s\S]*?maxFileBytes[\s\S]*?\}\s*\)/);
+    expect(script).toMatch(/partialView\s*=\s*true/);
+    expect(script).toMatch(/contextStrategy\s*=\s*adaptive\.strategy/);
+    expect(script).toMatch(/level:\s*["']info["']/);
+    expect(script).toMatch(/over-cap/);
+    // The OLD verdict:"skipped" + "file too large" emit path must be gone.
+    expect(script).not.toMatch(/verdict:\s*["']skipped["'][\s\S]{0,500}?file too large/);
+  });
+
+  it("buildPrompt accepts partialView and emits the partial-view instruction", () => {
+    const block = script.match(/function buildPrompt[\s\S]*?<\/file_content>/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    expect(body).toMatch(/partialView/);
+    expect(body).toMatch(/this is a partial view/i);
+    expect(body).toMatch(/do NOT speculate about omitted code/i);
+  });
+
+  it("runGitDiff never throws — returns null on any failure path", () => {
+    const block = script.match(/function runGitDiff[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    // Each rejection path resolves to null, not throws
+    expect(body).toMatch(/resolveDiff\(null\)/);
+    // Has its own timeout with SIGTERM
+    expect(body).toMatch(/SIGTERM/);
+  });
+
   // Phase 1 item #3: expanded skip patterns
   it("skips font files, archives, sourcemaps, snapshots, minified assets, and additional lockfiles", () => {
     // Fonts
@@ -590,7 +647,7 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(lines[0].verdict).toBe("skipped");
   });
 
-  it("full frontmatter — maxFileBytes from frontmatter takes precedence over default", () => {
+  it("full frontmatter — maxFileBytes from frontmatter is honored by adaptive-context path", () => {
     fs.writeFileSync(
       path.join(tempDir, ".codex-pair-context.md"),
       [
@@ -607,18 +664,61 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     );
     const filePath = path.join(tempDir, "src.ts");
     // 200 bytes — over the 50-byte frontmatter cap, under the default 20KB.
+    // With item #6 (adaptive context), this is NO LONGER a silent skip —
+    // the hook logs an "info"-level over-cap entry and proceeds to codex.
+    // Spawn is forced to fail fast via PATH=/nonexistent so we don't burn
+    // real codex tokens in the test suite.
     fs.writeFileSync(filePath, "x".repeat(200));
     const payload = JSON.stringify({
       tool_name: "Edit",
       tool_input: { file_path: filePath },
     });
-    const result = runHook(payload, tempDir);
+    // PATH set to node's own directory: node itself is findable so spawnSync
+    // can launch the hook, but git/codex aren't, so the hook's spawns fail
+    // fast via ENOENT instead of timing out. Keeps the test under 1s.
+    const isolatedPath = path.dirname(process.execPath);
+    const result = runHook(payload, tempDir, { PATH: isolatedPath });
     expect(result.status).toBe(0);
-    const logEntry = JSON.parse(
-      fs.readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8").trim().split("\n")[0],
-    );
-    expect(logEntry.verdict).toBe("skipped");
-    expect(logEntry.reason).toMatch(/cap:\s*50/);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    // Old behavior (verdict:skipped with file-too-large reason) MUST be gone.
+    expect(lines.some((l) => l.verdict === "skipped" && /file too large/i.test(l.reason ?? ""))).toBe(false);
+    // New behavior: info-level over-cap entry citing the frontmatter cap value.
+    expect(lines.some((l) => l.level === "info" && /over-cap/i.test(l.reason) && /50/.test(l.reason))).toBe(true);
+  });
+
+  // Phase 2 item #6 — runtime: adaptive context uses head+tail when git unavailable.
+  it("adaptive context — untracked file (no git repo) takes head+tail strategy", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), ["---", "maxFileBytes: 100", "---"].join("\n"));
+    const filePath = path.join(tempDir, "src.ts");
+    // 300+ lines of content, well over 100-byte cap; tempDir has no .git.
+    const lines: string[] = [];
+    for (let i = 0; i < 300; i++) lines.push(`line ${i}`);
+    fs.writeFileSync(filePath, lines.join("\n"));
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    // Force codex spawn to fail fast so we don't burn real tokens.
+    // PATH set to node's own directory: node itself is findable so spawnSync
+    // can launch the hook, but git/codex aren't, so the hook's spawns fail
+    // fast via ENOENT instead of timing out. Keeps the test under 1s.
+    const isolatedPath = path.dirname(process.execPath);
+    const result = runHook(payload, tempDir, { PATH: isolatedPath });
+    expect(result.status).toBe(0);
+    const logLines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    // Info-level over-cap entry mentions the chosen strategy.
+    const infoEntry = logLines.find((l) => l.level === "info" && /over-cap/.test(l.reason ?? ""));
+    expect(infoEntry).toBeTruthy();
+    // Strategy must be "head-tail" since tempDir has no git repo.
+    expect(infoEntry.reason).toMatch(/head-tail/);
   });
 
   it("malformed frontmatter — opener with no closer — logs warning and falls back to defaults", () => {

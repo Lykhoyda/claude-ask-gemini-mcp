@@ -219,6 +219,90 @@ function parseFrontmatter(content) {
   return { frontmatter, body, malformed: false };
 }
 
+// Spawn `git diff -U<n> HEAD -- <filePath>` with a hard timeout. Returns the
+// diff output as a string, or null on any failure (not a repo, untracked file,
+// git binary missing, timeout, non-zero exit). Never throws.
+function runGitDiff({ filePath, contextLines, cwd, timeoutMs }) {
+  return new Promise((resolveDiff) => {
+    let stdout = "";
+    let settled = false;
+    const child = spawn("git", ["diff", `-U${contextLines}`, "HEAD", "--", filePath], {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd,
+    });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", () => {
+      // discard stderr — we only care about successful diff output
+    });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill("SIGTERM");
+      } catch {}
+      resolveDiff(null);
+    }, timeoutMs);
+    child.on("error", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveDiff(null);
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0 && stdout.length > 0) {
+        resolveDiff(stdout);
+      } else {
+        resolveDiff(null);
+      }
+    });
+  });
+}
+
+// Build a partial-view payload for files that exceed the size cap. Three modes:
+//   - "diff": file is tracked in git and `git diff -U20` returned something
+//     useful. Sends `header-80-lines + diff-against-HEAD`.
+//   - "head-tail": file is untracked, git unavailable, or diff was too large.
+//     Sends `head-150 + omission marker + tail-80`.
+//   - "truncated": file has few lines but is still over the byte cap (e.g.,
+//     one massive minified line). Sends a hard-truncated slice.
+// Caller is responsible for the `partialView: true` flag on `buildPrompt`.
+async function buildAdaptiveContext({ filePath, fileContent, markerDir, maxFileBytes }) {
+  const diff = await runGitDiff({
+    filePath,
+    contextLines: 20,
+    cwd: markerDir,
+    timeoutMs: 5000,
+  });
+  const headerLines = fileContent.split("\n").slice(0, 80);
+  const headerText = headerLines.join("\n");
+  if (diff && Buffer.byteLength(diff, "utf8") < maxFileBytes) {
+    return {
+      strategy: "diff",
+      content: `<file_header_first_80_lines>\n${headerText}\n</file_header_first_80_lines>\n\n<diff_against_head>\n${diff}\n</diff_against_head>`,
+    };
+  }
+  const lines = fileContent.split("\n");
+  if (lines.length <= 230) {
+    const truncated = fileContent.slice(0, maxFileBytes);
+    return {
+      strategy: "truncated",
+      content: `<file_partial_view_truncated>\n${truncated}\n[... rest of file truncated due to size cap ...]\n</file_partial_view_truncated>`,
+    };
+  }
+  const head = lines.slice(0, 150).join("\n");
+  const tail = lines.slice(-80).join("\n");
+  const omitted = lines.length - 230;
+  return {
+    strategy: "head-tail",
+    content: `<file_head_first_150_lines>\n${head}\n</file_head_first_150_lines>\n\n[... ${omitted} lines omitted ...]\n\n<file_tail_last_80_lines>\n${tail}\n</file_tail_last_80_lines>`,
+  };
+}
+
 // Resolve runtime config per-marker. Precedence: frontmatter > env > default.
 // Invalid types in frontmatter are silently ignored (fall through to env/default).
 function resolveConfig(frontmatter) {
@@ -262,13 +346,16 @@ async function findMarkerUp(startDir) {
   return null;
 }
 
-function buildPrompt({ filePath, fileContent, toolName, projectContext }) {
+function buildPrompt({ filePath, fileContent, toolName, projectContext, partialView }) {
   const contextBlock = projectContext.trim()
     ? `## Project context\n\n${projectContext.trim()}\n\n`
     : "";
+  const partialViewBlock = partialView
+    ? `## IMPORTANT: this is a partial view\n\nThe file is larger than the configured size cap. Only a slice is shown below (file header + git diff against HEAD, OR head + tail). Flag concerns ONLY if they are visible in this slice — do NOT speculate about omitted code. If you can't see enough to judge, prefer NONE over manufactured concerns.\n\n`
+    : "";
   return `You are a senior software engineer reviewing a file another AI agent (Claude) just edited. Find every concern worth a human's attention. Don't try to be polite or balanced — your job is to surface what's actually wrong or risky.
 
-${contextBlock}## Output format — strict
+${contextBlock}${partialViewBlock}## Output format — strict
 
 Respond with exactly one of these two shapes:
 
@@ -573,21 +660,38 @@ async function main() {
   }
 
   const fileBytes = Buffer.byteLength(fileContent, "utf8");
+  // Adaptive context: under-cap → full file (unchanged). Over-cap → build a
+  // partial view (diff or head+tail) and pass a partial-view warning to codex
+  // instead of silently skipping. Replaces ADR-077's original over-cap skip.
+  let promptContent = fileContent;
+  let partialView = false;
+  let contextStrategy = "full";
   if (fileBytes > config.maxFileBytes) {
+    const adaptive = await buildAdaptiveContext({
+      filePath,
+      fileContent,
+      markerDir,
+      maxFileBytes: config.maxFileBytes,
+    });
+    promptContent = adaptive.content;
+    partialView = true;
+    contextStrategy = adaptive.strategy;
     await appendLog(markerDir, {
       timestamp: new Date().toISOString(),
       tool: toolName,
       file: filePath,
-      verdict: "skipped",
-      reason: `file too large: ${fileBytes} bytes (cap: ${config.maxFileBytes})`,
+      level: "info",
+      reason: `over-cap (${fileBytes} bytes > ${config.maxFileBytes}); using adaptive context strategy "${contextStrategy}"`,
     });
-    await emitSystemMessage(
-      `codex-pair ${VERDICT_PREFIXES.skipped}: ${filePath} — file too large (${fileBytes} bytes, cap ${config.maxFileBytes})`,
-    );
-    process.exit(0);
   }
 
-  const prompt = buildPrompt({ filePath, fileContent, toolName, projectContext });
+  const prompt = buildPrompt({
+    filePath,
+    fileContent: promptContent,
+    toolName,
+    projectContext,
+    partialView,
+  });
 
   const startedAt = Date.now();
   let response;
