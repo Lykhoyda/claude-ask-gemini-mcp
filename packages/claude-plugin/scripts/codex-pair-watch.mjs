@@ -303,6 +303,93 @@ async function buildAdaptiveContext({ filePath, fileContent, markerDir, maxFileB
   };
 }
 
+// Read `.codex-pair-ignore` from the marker directory if present. Returns an
+// array of rule objects in declaration order. Missing file / read error →
+// empty array. Comments (`#` lines) and blank lines are filtered out. Each
+// rule carries `{ negate, pattern, raw }`. Per-project, single file — no
+// nested ignore-file traversal in subdirs (the marker is the project anchor).
+function readIgnoreFile(markerDir) {
+  let content;
+  try {
+    content = readFileSync(join(markerDir, ".codex-pair-ignore"), "utf8");
+  } catch {
+    return [];
+  }
+  const rules = [];
+  for (const rawLine of content.split("\n")) {
+    const line = rawLine.replace(/\r$/, "").trim();
+    if (line.length === 0 || line.startsWith("#")) continue;
+    const negate = line.startsWith("!");
+    const pattern = negate ? line.slice(1) : line;
+    if (pattern.length === 0) continue;
+    rules.push({ negate, pattern, raw: line });
+  }
+  return rules;
+}
+
+// Convert a gitignore-style glob into a JS RegExp. Handles `*` (any chars
+// except `/`), `**` (any chars including `/`), `?` (single char except `/`),
+// `[abc]` character class, leading `/` anchors to marker dir, trailing `/`
+// matches directory contents. Does NOT support the full gitignore spec —
+// the common cases work; weird precedence edge cases are out of scope.
+function globToRegex(pattern) {
+  const anchored = pattern.startsWith("/");
+  const trailingSlash = pattern.endsWith("/");
+  let p = anchored ? pattern.slice(1) : pattern;
+  if (trailingSlash) p = p.slice(0, -1);
+  let body = "";
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === "*") {
+      if (p[i + 1] === "*") {
+        body += ".*";
+        i++;
+        if (p[i + 1] === "/") i++;
+      } else {
+        body += "[^/]*";
+      }
+    } else if (c === "?") {
+      body += "[^/]";
+    } else if (c === "[") {
+      const end = p.indexOf("]", i);
+      if (end === -1) {
+        body += "\\[";
+      } else {
+        body += p.slice(i, end + 1);
+        i = end;
+      }
+    } else if ("().+|^$\\".includes(c)) {
+      body += `\\${c}`;
+    } else {
+      body += c;
+    }
+  }
+  const prefix = anchored ? "^" : "(^|.*/)";
+  const suffix = "(/.*)?$";
+  return new RegExp(prefix + body + suffix);
+}
+
+// Walk rules in declaration order; the last matching rule wins. If that last
+// matching rule is a negation (!pattern), the file is NOT ignored. Returns
+// the matching rule object or null if no rule matches (or final match is a
+// negation). `filePath` is normalized to a marker-relative path.
+function matchesIgnoreRule(filePath, markerDir, rules) {
+  if (rules.length === 0) return null;
+  let rel = filePath;
+  const prefix = `${markerDir}/`;
+  if (filePath.startsWith(prefix)) {
+    rel = filePath.slice(prefix.length);
+  }
+  let lastMatch = null;
+  for (const rule of rules) {
+    if (globToRegex(rule.pattern).test(rel)) {
+      lastMatch = rule;
+    }
+  }
+  if (lastMatch && lastMatch.negate) return null;
+  return lastMatch;
+}
+
 // Resolve runtime config per-marker. Precedence: frontmatter > env > default.
 // Invalid types in frontmatter are silently ignored (fall through to env/default).
 function resolveConfig(frontmatter) {
@@ -614,6 +701,22 @@ async function main() {
 
   const lower = filePath.toLowerCase();
   if (SKIP_PATTERNS.some((p) => lower.includes(p))) process.exit(0);
+
+  // .codex-pair-ignore — granular per-project opt-out via gitignore-style
+  // globs. Match → silent log skip with the matching pattern, NO
+  // systemMessage (preserves silent-gating UX for opted-out files).
+  const ignoreRules = readIgnoreFile(markerDir);
+  const ignoreMatch = matchesIgnoreRule(filePath, markerDir, ignoreRules);
+  if (ignoreMatch) {
+    await appendLog(markerDir, {
+      timestamp: new Date().toISOString(),
+      tool: toolName,
+      file: filePath,
+      verdict: "skipped",
+      reason: `matched .codex-pair-ignore: ${ignoreMatch.raw}`,
+    });
+    process.exit(0);
+  }
 
   // Read + parse the marker file FIRST so config (model/timeout/cap/threshold)
   // can take effect on the file-size check below. Malformed frontmatter is a

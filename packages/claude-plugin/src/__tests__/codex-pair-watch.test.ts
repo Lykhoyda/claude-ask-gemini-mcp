@@ -253,6 +253,65 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(body).toMatch(/SIGTERM/);
   });
 
+  // Phase 2 item #7: .codex-pair-ignore granular opt-out
+  it("readIgnoreFile + matchesIgnoreRule + globToRegex helpers exist", () => {
+    expect(script).toMatch(/function readIgnoreFile/);
+    expect(script).toMatch(/function globToRegex/);
+    expect(script).toMatch(/function matchesIgnoreRule/);
+    expect(script).toMatch(/\.codex-pair-ignore/);
+  });
+
+  it("ignore file parser handles `#` comments and `!` negation", () => {
+    const block = script.match(/function readIgnoreFile[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    // Comment lines (leading #) are skipped
+    expect(body).toMatch(/startsWith\(["']#["']\)/);
+    // Negation parsed into a `negate` flag
+    expect(body).toMatch(/startsWith\(["']!["']\)/);
+    expect(body).toMatch(/negate/);
+  });
+
+  it("glob matcher supports *, **, ?, [...], anchored /, trailing /", () => {
+    const block = script.match(/function globToRegex[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    // `*` → [^/]* (no path separators)
+    expect(body).toMatch(/\[\^\/\]\*/);
+    // `**` → .* (across separators)
+    expect(body).toMatch(/body \+= ["']\.\*["']/);
+    // `?` → [^/]
+    expect(body).toMatch(/\[\^\/\]/);
+    // Anchored handling
+    expect(body).toMatch(/anchored/);
+    // Trailing slash handling
+    expect(body).toMatch(/trailingSlash/);
+  });
+
+  it("matchesIgnoreRule: last matching rule wins, `!` re-includes", () => {
+    const block = script.match(/function matchesIgnoreRule[\s\S]*?^}/m);
+    expect(block).toBeTruthy();
+    const body = block?.[0] ?? "";
+    // Iterates rules and tracks last match
+    expect(body).toMatch(/lastMatch/);
+    // Negation re-include returns null
+    expect(body).toMatch(/lastMatch\.negate/);
+    expect(body).toMatch(/return null/);
+  });
+
+  it("main() invokes ignore-check between SKIP_PATTERNS and frontmatter parse, no systemMessage on match", () => {
+    // Pin the call sequence — ignore-check comes after SKIP_PATTERNS but
+    // before the marker-file read/parse.
+    expect(script).toMatch(/SKIP_PATTERNS[\s\S]{0,800}?readIgnoreFile/);
+    expect(script).toMatch(/matchesIgnoreRule/);
+    // On match, log skip AND exit WITHOUT emitSystemMessage. Verify the
+    // ignore-match block does NOT include a systemMessage call.
+    const ignoreBlock = script.match(/if\s*\(\s*ignoreMatch[\s\S]*?process\.exit/);
+    expect(ignoreBlock).toBeTruthy();
+    expect(ignoreBlock?.[0]).toMatch(/matched \.codex-pair-ignore/);
+    expect(ignoreBlock?.[0]).not.toMatch(/emitSystemMessage/);
+  });
+
   // Phase 1 item #3: expanded skip patterns
   it("skips font files, archives, sourcemaps, snapshots, minified assets, and additional lockfiles", () => {
     // Fonts
@@ -688,6 +747,103 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(lines.some((l) => l.verdict === "skipped" && /file too large/i.test(l.reason ?? ""))).toBe(false);
     // New behavior: info-level over-cap entry citing the frontmatter cap value.
     expect(lines.some((l) => l.level === "info" && /over-cap/i.test(l.reason) && /50/.test(l.reason))).toBe(true);
+  });
+
+  // Phase 2 item #7 — runtime: .codex-pair-ignore matching
+  it("ignore-file: extension glob matches, hook exits silently with log entry", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-ignore"), "*.test.ts\n");
+    const filePath = path.join(tempDir, "foo.test.ts");
+    fs.writeFileSync(filePath, "test stuff");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHook(payload, tempDir);
+    expect(result.status).toBe(0);
+    // NO systemMessage (silent UX for opted-out files)
+    expect(result.stdout).toBe("");
+    // BUT log entry recording the skip
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines[0].verdict).toBe("skipped");
+    expect(lines[0].reason).toMatch(/matched \.codex-pair-ignore: \*\.test\.ts/);
+  });
+
+  it("ignore-file: directory glob (trailing /) excludes everything under it", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-ignore"), "experiments/\n");
+    const dir = path.join(tempDir, "experiments");
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, "scratch.ts");
+    fs.writeFileSync(filePath, "junk");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHook(payload, tempDir);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines[0].reason).toMatch(/experiments\//);
+  });
+
+  it("ignore-file: `!` negation re-includes a file the broader rule would exclude", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-ignore"), "experiments/\n!experiments/important.ts\n");
+    const dir = path.join(tempDir, "experiments");
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, "important.ts");
+    fs.writeFileSync(filePath, "important code");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    // PATH-isolated so spawn fails fast (we only care that the hook did NOT
+    // exit at the ignore-check, i.e. no "skipped: matched .codex-pair-ignore"
+    // entry should be present).
+    const isolatedPath = path.dirname(process.execPath);
+    const result = runHook(payload, tempDir, { PATH: isolatedPath });
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    // Negation: file should NOT be excluded by the ignore rules. The
+    // skipped-by-ignore path must not appear; the hook proceeded past
+    // ignore-check and into the actual review (which fails on spawn).
+    expect(lines.some((l) => l.verdict === "skipped" && /matched \.codex-pair-ignore/.test(l.reason ?? ""))).toBe(
+      false,
+    );
+  });
+
+  it("ignore-file: missing file is harmless (no-op pass-through)", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    // No .codex-pair-ignore created.
+    const missingPath = path.join(tempDir, "does-not-exist.ts");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: missingPath },
+    });
+    const result = runHook(payload, tempDir);
+    expect(result.status).toBe(0);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    // No ignore-related skip — the skip is from the unreadable target file.
+    expect(lines.some((l) => /matched \.codex-pair-ignore/.test(l.reason ?? ""))).toBe(false);
+    expect(lines[0].verdict).toBe("skipped");
+    expect(lines[0].reason).toMatch(/unreadable/);
   });
 
   // Phase 2 item #6 — runtime: adaptive context uses head+tail when git unavailable.
