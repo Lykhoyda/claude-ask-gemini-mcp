@@ -18,7 +18,7 @@ This is NOT a slash command you invoke. It's a hook that runs automatically when
 | Glue code, CRUD, refactors | Security-sensitive paths (auth, untrusted input) |
 | You want one comprehensive report | Implementing a written spec (RFC, protocol) |
 | You're cost-sensitive (~$0.04/review) | Concurrency-heavy state management |
-| Default for everything | Cost is acceptable (~$0.20/edit pass) |
+| Default for everything | Cost (~$0.04–0.07 per file reviewed) is acceptable |
 
 The empirical finding from the 4-task benchmark: `/codex-review`'s "confidence ≥ 80" filter structurally suppresses domain-level "this is wrong but won't crash" issues (float-money precision, cross-cutting validation gaps, edge-case clamping). codex-pair's HIGH/MED/LOW threshold catches them. Different classes of bug, not the same class with different completeness.
 
@@ -33,8 +33,12 @@ This is a payment-processing service. All currency calculations must use
 integer cents internally (floating-point loses precision on every charge).
 Concurrent requests are real. URL inputs are untrusted.
 
-[Add any deployment shape, stated requirements, or threat surface the
-reviewer should know when reasoning about a single file in isolation.]
+[Add domain invariants Codex can't infer from one file in isolation.
+Examples —
+ Security: "all routes check user.role before any state read".
+ Specs: "protocol XYZ frame format must include version byte".
+ State: "cart syncs to localStorage on every mutation".
+ Concurrency: "this handler must be idempotent under retry".]
 ```
 
 The hook is always loaded by the plugin, but **self-gates on this file's presence**. No file → silent no-op (zero codex calls, zero cost). File present → every Edit/Write/MultiEdit triggers a codex review.

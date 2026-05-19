@@ -138,13 +138,14 @@ cat > .codex-pair/context.md <<'EOF'
 This is a payment-processing service. Currency must use integer cents.
 Concurrent requests are real. URL inputs are untrusted.
 
-[Add deployment shape, stated requirements, or threat surface here.]
+[Add domain invariants Codex can't infer from one file — e.g.
+"all routes check user.role", "handler must be idempotent under retry".]
 EOF
 ```
 
 Once the marker exists at the project root, every file edit triggers a Codex review with the marker's content as project context. `rm -rf .codex-pair/` to disable.
 
-**How it differs from `/codex-review`** (see [ADR-077](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md) for the four-task benchmark):
+**How it differs from `/codex-review`** — in the [ADR-077](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md) four-task benchmark: Claude alone caught **2/10** probes; +`/codex-review` caught **7/10**; +`codex-pair` caught **10/10**. The three probes `/codex-review` missed (float-money precision, validation bypass, edge-case clamping) are the "domain-wrong but won't crash" class its ≥80-confidence filter structurally suppresses.
 
 | Use `/codex-review` (precision-first) | Use `codex-pair` (recall-first) |
 |---|---|
@@ -152,6 +153,6 @@ Once the marker exists at the project root, every file edit triggers a Codex rev
 | Glue code, CRUD, refactors | Security-sensitive paths |
 | You want one comprehensive report | Implementing a written spec (RFC, protocol) |
 | You're cost-sensitive (~$0.04 per review) | Concurrency-heavy state management |
-| Default for everything | Cost is acceptable (~$0.20 per edit pass) |
+| Default for everything | Cost (~$0.04–0.07 per file reviewed) is acceptable |
 
 The empirical finding: `/codex-review`'s "confidence ≥ 80" filter structurally suppresses domain-level "this is wrong but won't crash" issues (float-money precision, cross-cutting validation gaps, edge-case clamping). `codex-pair`'s HIGH/MED/LOW threshold catches them. Different classes of bug — the two surfaces are complementary.

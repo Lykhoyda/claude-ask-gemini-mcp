@@ -34,7 +34,6 @@ claude mcp add --scope user ollama -- npx -y ask-ollama-mcp
 | `/multi-review` | Parallel Gemini + Codex review with 4-phase validation pipeline and consensus highlighting |
 | `/gemini-review` | Gemini-only code review with confidence filtering |
 | `/codex-review` | Codex-only code review (precision-first, ≥80 confidence — default for routine PR review) |
-| `/codex-pair` | **Recall-first** continuous review via PostToolUse hook — opt-in per project via `.codex-pair/context.md` marker file. Complement to `/codex-review` for money/security/spec-implementing code (see [ADR-077](../../docs/DECISIONS.md), layout per [ADR-092](../../docs/DECISIONS.md)) |
 | `/ollama-review` | Local review — no data leaves your machine |
 | `/brainstorm` | Multi-LLM brainstorm with Claude Opus as a first-class research participant (default external: gemini,codex) |
 | `/brainstorm-all` | Brainstorm with all three external providers + Claude Opus research |
@@ -58,7 +57,9 @@ claude mcp add --scope user ollama -- npx -y ask-ollama-mcp
 
 ## Enabling codex-pair mode
 
-The `codex-pair` hook is loaded by default but **self-gates on a marker file**. Without the marker, every edit triggers one `fs.access()` call and exits — zero codex calls, zero cost.
+`codex-pair` is a **PostToolUse hook**, not a slash command — it runs continuously after every file edit when opted in, and is the recall-first complement to `/codex-review`. In the four-task benchmark from [ADR-077](../../docs/DECISIONS.md): Claude alone caught **2 of 10** probes; Claude + `/codex-review` caught **7 of 10**; Claude + `codex-pair` caught **10 of 10**. The three probes `/codex-review` missed (float-money precision, validation bypass, edge-case clamping) are exactly the "domain-wrong but won't crash" class its ≥80-confidence precision filter structurally suppresses.
+
+The hook is loaded by default but **self-gates on a marker file**. Without the marker, every edit triggers one `fs.access()` call and exits — zero codex calls, zero cost.
 
 To enable for a project:
 
@@ -71,10 +72,12 @@ This is a payment-processing service. Currency must use integer cents
 (floats lose precision on every charge). Concurrent requests are real.
 URL inputs are untrusted.
 
-[Add deployment shape, stated requirements, or threat surface the
-reviewer should know.]
+[Add domain invariants Codex can't infer from one file — e.g.
+"all routes check user.role", "handler must be idempotent under retry".]
 EOF
 ```
+
+**Do not commit `.codex-pair/`** — gitignore it. The hook ships with the plugin (project policy); the marker is each developer's own activation switch and review context. A single `.codex-pair/` line in `.gitignore` covers the marker, log, cache, and all state files (see [ADR-092](../../docs/DECISIONS.md)).
 
 Once present, every Edit/Write/MultiEdit triggers a Codex review of the file with the marker's content as project context. HIGH and MED concerns appear to Claude as system reminders on the next turn; LOW concerns are logged to `.codex-pair/log.jsonl` but suppressed from surfacing.
 

@@ -39,7 +39,19 @@ The pre-commit hook is hardcoded to use Gemini via the `gemini` CLI directly. To
 
 > No marker file → the hook exits silently after one `fs.access()` call. **Zero codex calls, zero cost.** This is by design: the hook ships in every plugin install, but does nothing until a project opts in.
 
-The motivation, four-task benchmark, and design rationale are in [ADR-077](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md). In short: `/codex-review`'s precision filter (confidence ≥ 80) structurally suppresses a class of bug — float-money precision, cross-cutting validation gaps, edge-case clamping — that `codex-pair`'s recall-first HIGH/MED/LOW grading catches. The two surfaces are complementary, not competing.
+**Why this exists** — in the four-task benchmark from [ADR-077](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md): Claude alone caught **2 of 10** probes; Claude + `/codex-review` caught **7 of 10**; Claude + `codex-pair` caught **10 of 10**. The three probes `/codex-review` missed — float-money precision, validation bypass, edge-case clamping — are exactly the "domain-wrong but won't crash" class its ≥80-confidence precision filter structurally suppresses. `codex-pair`'s recall-first HIGH/MED/LOW grading catches that class. The two surfaces are **complementary, not competing**.
+
+### When to enable it
+
+Decide BEFORE you opt in — the hook costs real money per edit, and the value is highest on code where missed concerns have outsized blast radius.
+
+| Use the hook (recall-first) | Stick with `/codex-review` only (precision-first) |
+|---|---|
+| Money / billing code | Routine PR review |
+| Security-sensitive paths (auth, untrusted input) | Glue code, CRUD, refactors |
+| Implementing a written spec (RFC, protocol) | Cost-sensitive sessions |
+| Concurrency-heavy state management | One comprehensive report is enough |
+| Cost (~$0.04–0.07 per file reviewed) is acceptable | |
 
 ### Enable it
 
@@ -54,8 +66,10 @@ This is a payment-processing service. All currency calculations must
 use integer cents internally (floating-point loses precision on every
 charge). Concurrent requests are real. URL inputs are untrusted.
 
-[Add deployment shape, stated requirements, or threat surface the
-reviewer should know when reasoning about a single file in isolation.]
+[Add domain invariants Codex can't infer from one file. Examples —
+ Security: "all routes check user.role".
+ Specs: "protocol XYZ must be followed".
+ Concurrency: "this handler must be idempotent under retry".]
 EOF
 ```
 
@@ -80,16 +94,6 @@ money, which violates the stated requirement that currency uses
 integer cents. Use integer minor units such as
 `priceCents: z.number().int().nonnegative()`.
 ```
-
-### When to enable it
-
-| Use the hook (recall-first) | Stick with `/codex-review` only (precision-first) |
-|---|---|
-| Money / billing code | Routine PR review |
-| Security-sensitive paths (auth, untrusted input) | Glue code, CRUD, refactors |
-| Implementing a written spec (RFC, protocol) | Cost-sensitive sessions |
-| Concurrency-heavy state management | One comprehensive report is enough |
-| Cost (~$0.04–0.07 per edit) is acceptable | |
 
 ### Disable it
 
