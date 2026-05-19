@@ -17,6 +17,11 @@ Full design + per-item effort estimates + ADR dependencies + verified empirical 
 
 **ADRs to author during this work:** ADR-083 (output contract), ADR-084 (debounce semantics), ADR-085 (module boundary policy), ADR-086 (broker transport + lifecycle).
 
+### Recently shipped (post-Tier 2 follow-ons)
+
+- **ADR-092 — Consolidated `.codex-pair/` directory layout** (PR #92, 2026-05-19). All hook state (marker, log, ignore globs, cache, pause sentinel, inflight locks) nests under a single `.codex-pair/` directory; `.gitignore` collapses from 4 enumerated entries to 1; path-resolver pattern in `lib/state.mjs` is the single source of truth so future state files require no consumer changes. No migration helper per maintainer direction. Byte-identical behavior to v0.6.7 — cache, log shape, broker interface, atomicity contracts all unchanged.
+- **Docs refinement for codex-pair communication** (PR #93, 2026-05-19). Six brainstorm-driven copy/structural improvements across README, hooks.md, overview.md, skills.md, and SKILL.md: inlined the empirical 2/10 → 7/10 → 10/10 benchmark numbers (previously buried behind an ADR-077 hyperlink); removed `codex-pair` from Skills tables (it's a hook, not a slash command) and replaced with a redirect callout; added per-developer / do-not-commit guidance to README; reordered hooks.md to put decision-frame before mechanics; reconciled $0.04–0.07/file cost across all surfaces (resolving a SKILL.md $0.20/edit-pass contradiction Claude alone caught in cross-surface review); broadened marker-context placeholder to categorized concrete invariants (Security/Specs/State/Concurrency).
+
 ## ~~Priority 2: Claude Code Plugin~~ ALL DONE
 - See [design doc](plans/2026-02-25-claude-code-plugin-design.md)
 
