@@ -47,17 +47,22 @@ The marker file's *presence* is the switch; its *content* is the context codex n
 .codex-pair-context.md
 .codex-pair-log.jsonl
 .codex-pair-cache/
+.codex-pair-state/
 ```
 
 To onboard a new contributor, point them at this skill (or `apps/docs/plugin/hooks.md`) to write their own marker — or share a template via a separate (committed) `.codex-pair-context.example.md` they can copy and tweak locally.
 
-## How to disable
+## How to pause or disable
 
 | Goal | How |
 |---|---|
+| Temporarily for this project (keep marker, keep project context) | `/codex-pair-pause` (resume with `/codex-pair-resume`) |
+| Per-file/per-directory | Add patterns to `.codex-pair-ignore` (gitignore-style globs) |
 | Permanently for this project | `rm .codex-pair-context.md` |
 | Just this session | `/plugin disable ask-llm` |
 | Just this command | `CODEX_PAIR_DISABLED=1 <whatever command>` |
+
+`/codex-pair-pause` writes a `.codex-pair-state/paused` sentinel that the hook checks on every Edit/Write/MultiEdit; while present, the hook exits silently with a `verdict:"skipped"` log entry naming the pause. `/codex-pair-resume` removes the sentinel. The pause is per-project and per-developer — keep `.codex-pair-state/` in `.gitignore` alongside the marker, log, and cache.
 
 ## Behavior when active
 

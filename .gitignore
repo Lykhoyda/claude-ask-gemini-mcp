@@ -53,6 +53,7 @@ packages/*/package.json.bak
 .codex-pair-context.md
 .codex-pair-log.jsonl
 .codex-pair-cache/
+.codex-pair-state/
 
 # git worktrees — per-developer isolated working copies created via
 # `git worktree add .worktrees/<branch>`. The skill that creates these

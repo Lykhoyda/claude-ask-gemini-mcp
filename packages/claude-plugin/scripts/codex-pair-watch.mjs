@@ -28,7 +28,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -85,6 +85,14 @@ const TRANSIENT_SIGNALS = [
 const CACHE_DIR = ".codex-pair-cache";
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 50;
+
+// Pause/resume state — sibling concept to the marker. The marker's *presence*
+// is the project-level on-switch; this sentinel toggles a *temporary* pause
+// without touching the marker (preserves project context). Per-developer
+// (gitignored alongside the marker and cache). Slash commands
+// /codex-pair-pause and /codex-pair-resume manage it.
+const PAUSE_STATE_DIR = ".codex-pair-state";
+const PAUSE_SENTINEL_FILE = "paused";
 
 // Marker-walk anchor for the unhandled-exception catch handler. main() sets
 // this to `dirname(filePath)` once the payload is validated; the catch
@@ -397,6 +405,19 @@ async function buildAdaptiveContext({ filePath, fileContent, markerDir, maxFileB
 // Read `.codex-pair-ignore` from the marker directory if present. Returns an
 // array of rule objects in declaration order. Missing file / read error →
 // empty array. Comments (`#` lines) and blank lines are filtered out. Each
+// Temporary pause check. Returns true iff <markerDir>/.codex-pair-state/paused
+// exists. Toggled via /codex-pair-pause and /codex-pair-resume skills.
+// Stat-only (no content read) so it's a single syscall on the happy path of
+// every Edit/Write — runs on the same gating tier as SKIP_PATTERNS.
+function isPaused(markerDir) {
+  try {
+    statSync(join(markerDir, PAUSE_STATE_DIR, PAUSE_SENTINEL_FILE));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // rule carries `{ negate, pattern, raw }`. Per-project, single file — no
 // nested ignore-file traversal in subdirs (the marker is the project anchor).
 function readIgnoreFile(markerDir) {
@@ -1052,6 +1073,17 @@ async function main() {
   const markerPath = await findMarkerUp(markerAnchor);
   if (!markerPath) process.exit(0);
   const markerDir = dirname(markerPath);
+
+  if (isPaused(markerDir)) {
+    await appendLog(markerDir, {
+      timestamp: new Date().toISOString(),
+      tool: toolName,
+      file: filePath,
+      verdict: "skipped",
+      reason: "paused via /codex-pair-pause (rm .codex-pair-state/paused to resume)",
+    });
+    process.exit(0);
+  }
 
   const lower = filePath.toLowerCase();
   if (SKIP_PATTERNS.some((p) => lower.includes(p))) process.exit(0);

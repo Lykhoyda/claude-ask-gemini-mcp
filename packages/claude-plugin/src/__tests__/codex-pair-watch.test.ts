@@ -1503,6 +1503,78 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(timeoutEntry.reason).toMatch(/timed out/i);
   });
 
+  // ADR-085: Pause/resume sentinel.
+  //
+  // /codex-pair-pause writes <markerDir>/.codex-pair-state/paused. The hook
+  // checks the sentinel after marker resolution and exits silently with a
+  // verdict:"skipped" log entry. /codex-pair-resume removes the sentinel.
+  // Structural pin on the helper + two runtime tests (paused → skipped,
+  // sentinel removal → normal review attempt).
+
+  it("ADR-085: hook source defines isPaused helper and constants", () => {
+    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
+    expect(scriptText).toMatch(/const PAUSE_STATE_DIR\s*=\s*"\.codex-pair-state"/);
+    expect(scriptText).toMatch(/const PAUSE_SENTINEL_FILE\s*=\s*"paused"/);
+    expect(scriptText).toMatch(/function isPaused\(markerDir\)/);
+    expect(scriptText).toMatch(/statSync\(join\(markerDir,\s*PAUSE_STATE_DIR,\s*PAUSE_SENTINEL_FILE\)\)/);
+  });
+
+  it("ADR-085: paused sentinel makes hook exit silently with verdict:skipped log entry", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# test context");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair-state"), { recursive: true });
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-state", "paused"), "");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const result = runHook(payload, tempDir);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    const logPath = path.join(tempDir, ".codex-pair-log.jsonl");
+    expect(fs.existsSync(logPath)).toBe(true);
+    const lines = fs
+      .readFileSync(logPath, "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].verdict).toBe("skipped");
+    expect(lines[0].reason).toMatch(/paused via \/codex-pair-pause/);
+  });
+
+  it("ADR-085: removing the paused sentinel restores normal review attempt", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# test context");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair-state"), { recursive: true });
+    const sentinel = path.join(tempDir, ".codex-pair-state", "paused");
+    fs.writeFileSync(sentinel, "");
+    fs.unlinkSync(sentinel);
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    // PATH-isolate codex so the runtime test doesn't actually spawn it; the
+    // hook will reach the codex spawn site and fail fast with ENOENT.
+    // Verdict will be spawn_failed (or error) — anything OTHER than "skipped"
+    // is the assertion: we got past the pause gate.
+    const result = runHook(payload, tempDir, {
+      PATH: path.dirname(process.execPath),
+    });
+    expect(result.status).toBe(0);
+    const logPath = path.join(tempDir, ".codex-pair-log.jsonl");
+    expect(fs.existsSync(logPath)).toBe(true);
+    const lines = fs
+      .readFileSync(logPath, "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const skipForPause = lines.find((l) => l.verdict === "skipped" && /paused/.test(l.reason ?? ""));
+    expect(skipForPause).toBeUndefined();
+  });
+
   it("ADR-083: prompt requests strict JSON shape (no [HIGH]/[MED]/[LOW] labels prescribed)", () => {
     // Verify the prompt template asks for JSON, not the legacy label format.
     // The legacy format may still appear in the parser as a safety net, but
