@@ -16,6 +16,7 @@
 // invocation is inlined; semantics mirror `codexExecutor.ts` deliberately.
 
 import { spawn } from "node:child_process";
+import { platform } from "node:process";
 import {
   access,
   appendFile,
@@ -272,6 +273,43 @@ function parseFrontmatter(content) {
 }
 
 // Spawn `git diff -U<n> HEAD -- <filePath>` with a hard timeout. Returns the
+// ADR-084: Cross-platform process-tree termination. On macOS/Linux the
+// child is spawned with `detached: true` so it becomes its own process-group
+// leader; killing the negative PID signals the whole group (codex's Rust
+// subprocess, any git-via-codex calls, etc.). On Windows there's no POSIX
+// process group, so we shell out to `taskkill /F /T /PID <pid>` which
+// terminates the entire tree. Best-effort: failures are swallowed because
+// the only caller is a timeout/error path that's already returning.
+//
+// NOTE: `detached: true` does NOT detach the child's lifecycle from the
+// parent — that requires a separate `child.unref()` call. We deliberately
+// skip `unref()` so the parent waits for the child as normal.
+const IS_WINDOWS = platform === "win32";
+
+function terminateProcessTree(child, signal) {
+  if (!child || typeof child.pid !== "number" || child.killed || child.exitCode !== null) {
+    return;
+  }
+  if (IS_WINDOWS) {
+    try {
+      // /F = force, /T = tree (kills child + descendants)
+      spawn("taskkill", ["/pid", String(child.pid), "/f", "/t"], { stdio: "ignore" });
+    } catch {}
+    return;
+  }
+  // POSIX: negative PID = process group. Requires `detached: true` at spawn
+  // time, which is enforced at the call sites that need tree-kill.
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    // Group may already be gone (race with normal exit). Fall back to
+    // direct PID kill so we at least drop the leader if it's still alive.
+    try {
+      child.kill(signal);
+    } catch {}
+  }
+}
+
 // diff output as a string, or null on any failure (not a repo, untracked file,
 // git binary missing, timeout, non-zero exit). Never throws.
 function runGitDiff({ filePath, contextLines, cwd, timeoutMs }) {
@@ -281,6 +319,9 @@ function runGitDiff({ filePath, contextLines, cwd, timeoutMs }) {
     const child = spawn("git", ["diff", `-U${contextLines}`, "HEAD", "--", filePath], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd,
+      // detached:true on POSIX makes the child a process-group leader so
+      // terminateProcessTree can reach grandchildren via negative-PID kill.
+      detached: !IS_WINDOWS,
     });
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -291,9 +332,7 @@ function runGitDiff({ filePath, contextLines, cwd, timeoutMs }) {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try {
-        child.kill("SIGTERM");
-      } catch {}
+      terminateProcessTree(child, "SIGTERM");
       resolveDiff(null);
     }, timeoutMs);
     child.on("error", () => {
@@ -873,14 +912,20 @@ function verdictFromError(err) {
 }
 
 // Single codex invocation. The stdio + stdin-end pattern (and the SIGTERM →
-// SIGKILL escalation) mirrors `packages/shared/src/commandExecutor.ts`.
-// Critically: stdin must be "pipe" (not "ignore") and must be ended explicitly,
-// otherwise codex hangs on its stdin probe (issue #19 / first-hand observation:
-// stdout stalls at "Reading additional input from stdin..." indefinitely).
+// SIGKILL escalation, now tree-aware per ADR-084) mirrors
+// `packages/shared/src/commandExecutor.ts`. Critically: stdin must be "pipe"
+// (not "ignore") and must be ended explicitly, otherwise codex hangs on its
+// stdin probe (issue #19 / first-hand observation: stdout stalls at
+// "Reading additional input from stdin..." indefinitely).
 function spawnCodex({ prompt, model, timeoutMs }) {
   return new Promise((resolveCall, rejectCall) => {
     const args = buildCodexArgs(model);
-    const child = spawn("codex", args, { stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("codex", args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      // ADR-084: process-group leader on POSIX so terminateProcessTree can
+      // kill codex + the Rust subprocess + any git-via-codex grandchildren.
+      detached: !IS_WINDOWS,
+    });
 
     let stdout = "";
     let stderr = "";
@@ -900,13 +945,9 @@ function spawnCodex({ prompt, model, timeoutMs }) {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try {
-        child.kill("SIGTERM");
-      } catch {}
+      terminateProcessTree(child, "SIGTERM");
       setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {}
+        terminateProcessTree(child, "SIGKILL");
       }, 5000);
       rejectCall(
         taggedError(`codex exec timed out after ${Math.round(timeoutMs / 1000)}s`, "timeout"),

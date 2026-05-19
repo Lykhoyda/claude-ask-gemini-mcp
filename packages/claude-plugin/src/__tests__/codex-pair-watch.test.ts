@@ -1447,6 +1447,62 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(reviewEntry.counts.low).toBe(1);
   });
 
+  // ADR-084: Cross-platform process-tree termination.
+  //
+  // POSIX: hook spawns codex with `detached: true` (process group leader)
+  // and kills via `process.kill(-pid)`. Windows: hook uses `taskkill /T`.
+  // Structural tests pin both surfaces; the timeout functional test exercises
+  // the POSIX path end-to-end via the fake-codex `timeout` scenario.
+
+  it("ADR-084: hook source defines terminateProcessTree helper with POSIX + Windows branches", () => {
+    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
+    expect(scriptText).toMatch(/function terminateProcessTree/);
+    expect(scriptText).toMatch(/process\.kill\(-child\.pid/);
+    expect(scriptText).toMatch(/taskkill/);
+    expect(scriptText).toMatch(/['"]\/t['"]/i);
+    expect(scriptText).toMatch(/['"]\/f['"]/i);
+    expect(scriptText).toMatch(/detached:\s*!IS_WINDOWS/);
+  });
+
+  it("ADR-084: spawnCodex timeout path triggers process-tree termination (uses terminateProcessTree)", () => {
+    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
+    const spawnCodexBlock = scriptText.match(/function spawnCodex[\s\S]*?\n\}/);
+    expect(spawnCodexBlock).toBeTruthy();
+    expect(spawnCodexBlock?.[0]).toMatch(/terminateProcessTree\(child,\s*"SIGTERM"\)/);
+    expect(spawnCodexBlock?.[0]).toMatch(/terminateProcessTree\(child,\s*"SIGKILL"\)/);
+    const timeoutHandler = spawnCodexBlock?.[0].match(/setTimeout\(\(\) => \{[\s\S]*?timeoutMs\)/);
+    expect(timeoutHandler).toBeTruthy();
+    expect(timeoutHandler?.[0]).not.toMatch(/child\.kill\(/);
+  });
+
+  const itIfPosix = process.platform === "win32" ? it.skip : it;
+  itIfPosix("ADR-084: fake-codex 'timeout' scenario hits ASK_CODEX_TIMEOUT_MS and logs verdict:timeout", () => {
+    fs.writeFileSync(path.join(tempDir, ".codex-pair-context.md"), "# ctx");
+    const filePath = path.join(tempDir, "src.ts");
+    fs.writeFileSync(filePath, "export const x = 1;");
+    const payload = JSON.stringify({
+      tool_name: "Edit",
+      tool_input: { file_path: filePath },
+    });
+    const t0 = Date.now();
+    const result = runHook(payload, tempDir, {
+      PATH: `${FIXTURE_DIR}:${process.env.PATH}`,
+      FAKE_CODEX_SCENARIO: "timeout",
+      ASK_CODEX_TIMEOUT_MS: "1500",
+    });
+    const elapsed = Date.now() - t0;
+    expect(result.status).toBe(0);
+    expect(elapsed).toBeLessThan(10_000);
+    const lines = fs
+      .readFileSync(path.join(tempDir, ".codex-pair-log.jsonl"), "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const timeoutEntry = lines.find((l) => l.verdict === "timeout");
+    expect(timeoutEntry).toBeTruthy();
+    expect(timeoutEntry.reason).toMatch(/timed out/i);
+  });
+
   it("ADR-083: prompt requests strict JSON shape (no [HIGH]/[MED]/[LOW] labels prescribed)", () => {
     // Verify the prompt template asks for JSON, not the legacy label format.
     // The legacy format may still appear in the parser as a safety net, but
