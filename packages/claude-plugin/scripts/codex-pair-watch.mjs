@@ -16,7 +16,6 @@
 // invocation is inlined; semantics mirror `codexExecutor.ts` deliberately.
 
 import { spawn } from "node:child_process";
-import { platform } from "node:process";
 import {
   access,
   appendFile,
@@ -33,6 +32,25 @@ import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { IS_WINDOWS, terminateProcessTree } from "./lib/process.mjs";
+import {
+  buildVerdictMessage,
+  DEFAULT_SURFACE_THRESHOLD,
+  formatDuration,
+  parseConcerns,
+  VALID_THRESHOLDS,
+  VERDICT_PREFIXES,
+} from "./lib/parser.mjs";
+import {
+  appendLog,
+  computeCacheKey,
+  getCachedConcerns,
+  INFLIGHT_TTL_MIN_MS,
+  isPaused,
+  releaseInflightLock,
+  setCachedConcerns,
+  tryAcquireInflightLock,
+} from "./lib/state.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULTS_PATH = join(SCRIPT_DIR, "..", "codex-pair-defaults.json");
@@ -51,15 +69,10 @@ try {
 
 const MARKER_FILE = ".codex-pair-context.md";
 const WATCHED_TOOLS = new Set(["Edit", "Write", "MultiEdit"]);
-const LOG_FILENAME = ".codex-pair-log.jsonl";
 const DEFAULT_MODEL = process.env.ASK_CODEX_MODEL ?? CODEX_PAIR_DEFAULTS.model;
 const FALLBACK_MODEL = process.env.ASK_CODEX_FALLBACK_MODEL ?? CODEX_PAIR_DEFAULTS.fallbackModel;
 const DEFAULT_TIMEOUT_MS = Number(process.env.ASK_CODEX_TIMEOUT_MS ?? 800_000);
 const MAX_FILE_BYTES = Number(process.env.CODEX_PAIR_MAX_FILE_BYTES ?? 20_000);
-const MAX_LOG_BYTES = Number(process.env.CODEX_PAIR_MAX_LOG_BYTES ?? 2_000_000);
-const MAX_LOG_ENTRIES = 1000;
-const VALID_THRESHOLDS = new Set(["high", "med", "low"]);
-const DEFAULT_SURFACE_THRESHOLD = "med";
 const QUOTA_SIGNALS = ["rate_limit_exceeded", "quota_exceeded", "429", "insufficient_quota"];
 
 // Transient failure signatures (item #10). Errors matching any of these get
@@ -78,30 +91,10 @@ const TRANSIENT_SIGNALS = [
   /\b504\b/,
 ];
 
-// Cache configuration (item #8). Cache lives at `<markerDir>/.codex-pair-cache/<hash[0:2]>/<rest>.json`.
-// Value: { high, med, low, durationMs }. Keyed on the inputs that
-// deterministically produce a codex review outcome (same prompt + same model
-// = same review). TTL 10 minutes via mtime; LRU eviction at 50 files cap.
-const CACHE_DIR = ".codex-pair-cache";
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 50;
-
-// Pause/resume state — sibling concept to the marker. The marker's *presence*
-// is the project-level on-switch; this sentinel toggles a *temporary* pause
-// without touching the marker (preserves project context). Per-developer
-// (gitignored alongside the marker and cache). Slash commands
-// /codex-pair-pause and /codex-pair-resume manage it.
-const PAUSE_STATE_DIR = ".codex-pair-state";
-const PAUSE_SENTINEL_FILE = "paused";
-
-// Inflight lock (ADR-087): one codex review per file path at a time. New
-// PostToolUse fires on the same path while a review is in flight exit silently
-// with verdict:"skipped" reason:"coalesced". The in-flight reviewer reads the
-// file fresh when it spawns codex, so cumulative content of all queued edits
-// is what actually gets reviewed — addresses the "rename across 3 files"
-// false-positive class without resurrecting ADR-048's noise problem.
-const INFLIGHT_DIR = "inflight";
-const INFLIGHT_TTL_MIN_MS = 600_000;
+// Cache, log, pause, and inflight-lock state live in ./lib/state.mjs.
+// The hook imports computeCacheKey, getCachedConcerns, setCachedConcerns,
+// appendLog, isPaused, tryAcquireInflightLock, releaseInflightLock, and
+// INFLIGHT_TTL_MIN_MS at the top of this file.
 
 // Marker-walk anchor for the unhandled-exception catch handler. main() sets
 // this to `dirname(filePath)` once the payload is validated; the catch
@@ -112,22 +105,8 @@ const INFLIGHT_TTL_MIN_MS = 600_000;
 // previous cwd-only catch path as a residual cross-repo gap.
 let markerAnchor = null;
 
-// Closed verdict set. Every log entry's `verdict` field is one of these
-// strings. `systemMessage` prefixes mirror via VERDICT_PREFIXES so the user
-// can distinguish at a glance: OK (none), WARN (concerns), SKIP (intentional
-// skip), and the codex-side failure modes TIMEOUT / SPAWN_FAILED /
-// PARSE_FAILED / ERROR. The `cached` verdict is reserved for the Phase 3
-// response cache and unused today.
-const VERDICT_PREFIXES = {
-  none: "OK",
-  concerns: "WARN",
-  skipped: "SKIP",
-  error: "ERROR",
-  spawn_failed: "SPAWN_FAILED",
-  timeout: "TIMEOUT",
-  parse_failed: "PARSE_FAILED",
-  cached: "CACHED",
-};
+// Closed verdict set + presentation prefixes live in ./lib/parser.mjs
+// (VERDICT_PREFIXES). The hook imports them at the top.
 
 const SKIP_PATTERNS = [
   // Path patterns — leading/trailing slash guards against substring matches
@@ -192,46 +171,7 @@ function emitSystemMessage(text) {
   });
 }
 
-function formatDuration(durationMs) {
-  return `${(durationMs / 1000).toFixed(1)}s`;
-}
-
-// Build the systemMessage payload. `surfaceThreshold` controls which concern
-// levels are expanded into the message body. ADR-077 default keeps LOW in the
-// log only (threshold = "med"). The only opt-up is surfaceThreshold = "low";
-// the count summary line always includes LOW so the user knows LOWs exist.
-function buildVerdictMessage({
-  filePath,
-  concerns,
-  fellBack,
-  durationMs,
-  surfaceThreshold,
-  cached,
-}) {
-  const threshold = VALID_THRESHOLDS.has(surfaceThreshold)
-    ? surfaceThreshold
-    : DEFAULT_SURFACE_THRESHOLD;
-  const total = concerns.high.length + concerns.med.length + concerns.low.length;
-  const flag = fellBack ? " [fallback model]" : "";
-  const cachedTag = cached ? " [cached]" : "";
-  if (total === 0) {
-    return `codex-pair ${VERDICT_PREFIXES.none}${flag}${cachedTag}: ${filePath} — no concerns (${formatDuration(durationMs)})`;
-  }
-  const counts = `${concerns.high.length}H / ${concerns.med.length}M / ${concerns.low.length}L`;
-  const header = `codex-pair ${VERDICT_PREFIXES.concerns}${flag}${cachedTag}: ${filePath} — ${counts} (${formatDuration(durationMs)})`;
-  const details = [];
-  // HIGH always surfaces.
-  for (const c of concerns.high) details.push(`[HIGH]\n${c}`);
-  // MED surfaces at threshold "med" or "low".
-  if (threshold === "med" || threshold === "low") {
-    for (const c of concerns.med) details.push(`[MED]\n${c}`);
-  }
-  // LOW surfaces only when threshold === "low" (the sanctioned ADR-077 opt-up).
-  if (threshold === "low") {
-    for (const c of concerns.low) details.push(`[LOW]\n${c}`);
-  }
-  return details.length > 0 ? `${header}\n\n${details.join("\n\n")}` : header;
-}
+// formatDuration + buildVerdictMessage live in ./lib/parser.mjs.
 
 // Zero-dependency YAML frontmatter parser. Recognizes an opening `---` on
 // line 1, parses flat key:value lines, stops at the closing `---`. No nested
@@ -290,45 +230,9 @@ function parseFrontmatter(content) {
 }
 
 // Spawn `git diff -U<n> HEAD -- <filePath>` with a hard timeout. Returns the
-// ADR-084: Cross-platform process-tree termination. On macOS/Linux the
-// child is spawned with `detached: true` so it becomes its own process-group
-// leader; killing the negative PID signals the whole group (codex's Rust
-// subprocess, any git-via-codex calls, etc.). On Windows there's no POSIX
-// process group, so we shell out to `taskkill /F /T /PID <pid>` which
-// terminates the entire tree. Best-effort: failures are swallowed because
-// the only caller is a timeout/error path that's already returning.
-//
-// NOTE: `detached: true` does NOT detach the child's lifecycle from the
-// parent — that requires a separate `child.unref()` call. We deliberately
-// skip `unref()` so the parent waits for the child as normal.
-const IS_WINDOWS = platform === "win32";
-
-function terminateProcessTree(child, signal) {
-  if (!child || typeof child.pid !== "number" || child.killed || child.exitCode !== null) {
-    return;
-  }
-  if (IS_WINDOWS) {
-    try {
-      // /F = force, /T = tree (kills child + descendants)
-      spawn("taskkill", ["/pid", String(child.pid), "/f", "/t"], { stdio: "ignore" });
-    } catch {}
-    return;
-  }
-  // POSIX: negative PID = process group. Requires `detached: true` at spawn
-  // time, which is enforced at the call sites that need tree-kill.
-  try {
-    process.kill(-child.pid, signal);
-  } catch {
-    // Group may already be gone (race with normal exit). Fall back to
-    // direct PID kill so we at least drop the leader if it's still alive.
-    try {
-      child.kill(signal);
-    } catch {}
-  }
-}
-
 // diff output as a string, or null on any failure (not a repo, untracked file,
-// git binary missing, timeout, non-zero exit). Never throws.
+// git binary missing, timeout, non-zero exit). Never throws. Process-tree
+// termination is provided by ./lib/process.mjs (ADR-084 / ADR-088).
 function runGitDiff({ filePath, contextLines, cwd, timeoutMs }) {
   return new Promise((resolveDiff) => {
     let stdout = "";
@@ -411,79 +315,12 @@ async function buildAdaptiveContext({ filePath, fileContent, markerDir, maxFileB
   };
 }
 
+// isPaused, inflightLockPath, tryAcquireInflightLock, releaseInflightLock
+// all live in ./lib/state.mjs.
+
 // Read `.codex-pair-ignore` from the marker directory if present. Returns an
 // array of rule objects in declaration order. Missing file / read error →
 // empty array. Comments (`#` lines) and blank lines are filtered out. Each
-// Temporary pause check. Returns true iff <markerDir>/.codex-pair-state/paused
-// exists. Toggled via /codex-pair-pause and /codex-pair-resume skills.
-// Stat-only (no content read) so it's a single syscall on the happy path of
-// every Edit/Write — runs on the same gating tier as SKIP_PATTERNS.
-function isPaused(markerDir) {
-  try {
-    statSync(join(markerDir, PAUSE_STATE_DIR, PAUSE_SENTINEL_FILE));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ADR-087: inflight lock keyed on file path (NOT content). Successive edits
-// to the same file share a lock — only the first acquires, subsequent ones
-// coalesce (exit silently). Lock owner writes its PID; readers don't read
-// the content. Stale-recovery via mtime: a lock older than ttlMs is taken
-// over (covers crashed/SIGKILLed previous owners).
-function inflightLockPath(markerDir, filePath) {
-  const hash = createHash("sha256").update(filePath).digest("hex").slice(0, 16);
-  return join(markerDir, PAUSE_STATE_DIR, INFLIGHT_DIR, hash);
-}
-
-function tryAcquireInflightLock(markerDir, filePath, ttlMs) {
-  const lockPath = inflightLockPath(markerDir, filePath);
-  try {
-    mkdirSync(dirname(lockPath), { recursive: true });
-  } catch {
-    // mkdir failures fall through — writeFileSync below will report the real error
-  }
-  try {
-    writeFileSync(lockPath, String(process.pid), { flag: "wx" });
-    return { acquired: true, lockPath };
-  } catch (err) {
-    if (!err || err.code !== "EEXIST") {
-      return { acquired: false, lockPath, reason: "error" };
-    }
-  }
-  // Lock exists — check if stale
-  try {
-    const stats = statSync(lockPath);
-    if (Date.now() - stats.mtimeMs <= ttlMs) {
-      return { acquired: false, lockPath, reason: "in-flight" };
-    }
-  } catch {
-    // Lock vanished between EEXIST and stat — retry the create
-  }
-  // Stale (or vanished); take it over
-  try {
-    unlinkSync(lockPath);
-  } catch {
-    // someone else already cleaned up — fine, fall through to retry
-  }
-  try {
-    writeFileSync(lockPath, String(process.pid), { flag: "wx" });
-    return { acquired: true, lockPath, recoveredStale: true };
-  } catch {
-    return { acquired: false, lockPath, reason: "race" };
-  }
-}
-
-function releaseInflightLock(lockPath) {
-  if (!lockPath) return;
-  try {
-    unlinkSync(lockPath);
-  } catch {
-    // already gone — fine
-  }
-}
-
 // rule carries `{ negate, pattern, raw }`. Per-project, single file — no
 // nested ignore-file traversal in subdirs (the marker is the project anchor).
 function readIgnoreFile(markerDir) {
@@ -670,280 +507,13 @@ ${fileContent}
 </file_content>`;
 }
 
-// ADR-083: codex now responds with strict JSON. We try JSON first and fall
-// back to the legacy [HIGH]/[MED]/[LOW] regex parser as defense-in-depth
-// against a single bad codex response (model variance, partial output, etc.).
-// The fallback is NOT a documented contract — it's a one-version safety net
-// while ADR-083 settles.
+// ADR-083 JSON-first parser (tryExtractJson, parseConcernsJson,
+// parseConcernsLegacy, parseConcerns, formatFindingBody) lives in
+// ./lib/parser.mjs and is imported at the top of this file.
 
-const SEVERITY_TO_BUCKET = {
-  high: "high",
-  medium: "med",
-  // Tolerate the legacy short form in case the model emits it.
-  med: "med",
-  low: "low",
-};
-
-function tryExtractJson(message) {
-  const trimmed = message.trim();
-  if (trimmed.length === 0) return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {}
-  // Strip ```json ... ``` or ``` ... ``` fences if codex wrapped despite
-  // being told not to.
-  const fenceMatch = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i);
-  if (fenceMatch) {
-    try {
-      return JSON.parse(fenceMatch[1]);
-    } catch {}
-  }
-  // Last-ditch: find the first balanced top-level object.
-  const start = trimmed.indexOf("{");
-  if (start !== -1) {
-    let depth = 0;
-    let inString = false;
-    let escape = false;
-    for (let i = start; i < trimmed.length; i++) {
-      const ch = trimmed[i];
-      if (escape) {
-        escape = false;
-        continue;
-      }
-      if (ch === "\\" && inString) {
-        escape = true;
-        continue;
-      }
-      if (ch === '"') inString = !inString;
-      else if (!inString && ch === "{") depth++;
-      else if (!inString && ch === "}") {
-        depth--;
-        if (depth === 0) {
-          try {
-            return JSON.parse(trimmed.slice(start, i + 1));
-          } catch {
-            return null;
-          }
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function formatFindingBody(finding) {
-  // Render the JSON finding back to the same line shape buildVerdictMessage
-  // emits: <title>\n<file>:<line>: <body>\n<recommendation>.
-  const parts = [];
-  if (typeof finding.title === "string" && finding.title.trim().length > 0) {
-    parts.push(finding.title.trim());
-  }
-  const file = typeof finding.file === "string" ? finding.file.trim() : "";
-  const line = Number.isFinite(finding.line_start) ? `:${finding.line_start}` : "";
-  const body = typeof finding.body === "string" ? finding.body.trim() : "";
-  const fileLine = file ? `${file}${line}` : "";
-  if (fileLine && body) parts.push(`${fileLine}: ${body}`);
-  else if (fileLine) parts.push(fileLine);
-  else if (body) parts.push(body);
-  if (typeof finding.recommendation === "string" && finding.recommendation.trim().length > 0) {
-    parts.push(finding.recommendation.trim());
-  }
-  return parts.join("\n");
-}
-
-function parseConcernsJson(message) {
-  const obj = tryExtractJson(message);
-  if (!obj || typeof obj !== "object") return null;
-  // Accept either a top-level findings array or a clean verdict.
-  if (obj.verdict === "clean") {
-    return { high: [], med: [], low: [] };
-  }
-  if (!Array.isArray(obj.findings)) return null;
-  const concerns = { high: [], med: [], low: [] };
-  for (const f of obj.findings) {
-    if (!f || typeof f !== "object") continue;
-    const sev = typeof f.severity === "string" ? f.severity.toLowerCase() : "";
-    const bucket = SEVERITY_TO_BUCKET[sev];
-    if (!bucket) continue;
-    const rendered = formatFindingBody(f);
-    if (rendered.length === 0) continue;
-    concerns[bucket].push(rendered);
-  }
-  return concerns;
-}
-
-function parseConcernsLegacy(message) {
-  const trimmed = message.trim();
-  const upper = trimmed.toUpperCase();
-  if (upper === "NONE" || upper.startsWith("NONE\n")) {
-    return { high: [], med: [], low: [] };
-  }
-  const parts = trimmed.split(/(?=\[(?:HIGH|MED|LOW)\])/);
-  const concerns = { high: [], med: [], low: [] };
-  for (const part of parts) {
-    const labelMatch = part.match(/^\[(HIGH|MED|LOW)\]/);
-    if (!labelMatch) continue;
-    const body = part.slice(labelMatch[0].length).trim();
-    if (body.length === 0) continue;
-    const label = labelMatch[1].toLowerCase();
-    if (label === "high") concerns.high.push(body);
-    else if (label === "med") concerns.med.push(body);
-    else if (label === "low") concerns.low.push(body);
-  }
-  return concerns;
-}
-
-function parseConcerns(message) {
-  const fromJson = parseConcernsJson(message);
-  if (fromJson) return fromJson;
-  return parseConcernsLegacy(message);
-}
-
-// Content-hash cache (item #8). Key = sha256(model + prompt + fileContent +
-// surfaceThreshold). The four inputs together uniquely determine the codex
-// review outcome — same inputs, same review, same concerns. Cache write/read
-// failures are silent no-ops; cache misses fall through to normal codex spawn.
-function computeCacheKey({ model, prompt, fileContent, surfaceThreshold }) {
-  const h = createHash("sha256");
-  h.update(model);
-  h.update("\0");
-  h.update(prompt);
-  h.update("\0");
-  h.update(fileContent);
-  h.update("\0");
-  h.update(surfaceThreshold);
-  return h.digest("hex");
-}
-
-function cachePathFor(markerDir, cacheKey) {
-  return join(markerDir, CACHE_DIR, cacheKey.slice(0, 2), `${cacheKey.slice(2)}.json`);
-}
-
-async function getCachedConcerns(markerDir, cacheKey) {
-  const cachePath = cachePathFor(markerDir, cacheKey);
-  try {
-    const stats = await stat(cachePath);
-    if (Date.now() - stats.mtimeMs > CACHE_TTL_MS) return null;
-    const raw = await readFile(cachePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (
-      !parsed ||
-      !Array.isArray(parsed.high) ||
-      !Array.isArray(parsed.med) ||
-      !Array.isArray(parsed.low)
-    ) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-async function setCachedConcerns(markerDir, cacheKey, value) {
-  const cachePath = cachePathFor(markerDir, cacheKey);
-  try {
-    await mkdir(dirname(cachePath), { recursive: true });
-    // Atomic write via tmp + rename. A concurrent getCachedConcerns reader
-    // never sees a half-written cache file — it either reads the previous
-    // full content (rename hasn't landed yet) or the new full content
-    // (rename atomic on POSIX/Windows). Without this, a torn read fails
-    // JSON.parse and the cache entry is dead until eviction.
-    // PID suffix prevents collisions between concurrent hook invocations
-    // racing on the same cache key (rare — same prompt + same file from
-    // sibling Claude sessions — but cheap to guard against).
-    const tmpPath = `${cachePath}.tmp.${process.pid}`;
-    await writeFile(tmpPath, JSON.stringify(value));
-    await rename(tmpPath, cachePath);
-  } catch {
-    // intentional no-op — cache write failures must never break Claude's flow
-  }
-  await evictCacheOldest(markerDir);
-}
-
-async function evictCacheOldest(markerDir) {
-  try {
-    const cacheRoot = join(markerDir, CACHE_DIR);
-    const entries = [];
-    const prefixes = await readdir(cacheRoot);
-    for (const prefix of prefixes) {
-      let files;
-      try {
-        files = await readdir(join(cacheRoot, prefix));
-      } catch {
-        continue;
-      }
-      for (const file of files) {
-        const full = join(cacheRoot, prefix, file);
-        try {
-          const s = await stat(full);
-          entries.push({ path: full, mtimeMs: s.mtimeMs });
-        } catch {
-          // skip unreadable entries
-        }
-      }
-    }
-    if (entries.length <= CACHE_MAX_ENTRIES) return;
-    entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
-    const drop = entries.slice(0, entries.length - CACHE_MAX_ENTRIES);
-    for (const e of drop) {
-      try {
-        await unlink(e.path);
-      } catch {
-        // skip if already deleted by a concurrent run
-      }
-    }
-  } catch {
-    // intentional no-op — eviction is best-effort
-  }
-}
-
-// Cap log growth: when the file exceeds MAX_LOG_BYTES, keep only the most
-// recent MAX_LOG_ENTRIES lines via tmp-write + atomic rename. Rotation
-// failures must NEVER break Claude's flow — silent return on any error.
-async function rotateLogIfNeeded(logPath) {
-  try {
-    const stats = await stat(logPath);
-    if (stats.size <= MAX_LOG_BYTES) return;
-    const content = await readFile(logPath, "utf8");
-    const lines = content.split("\n").filter((l) => l.length > 0);
-    if (lines.length <= MAX_LOG_ENTRIES) return;
-    const tail = lines.slice(-MAX_LOG_ENTRIES);
-    const tmpPath = `${logPath}.tmp`;
-    await writeFile(tmpPath, `${tail.join("\n")}\n`);
-    await rename(tmpPath, logPath);
-  } catch {
-    // intentional no-op — rotation is best-effort
-  }
-}
-
-// Keep individual log entries under POSIX PIPE_BUF (4096) so the appendFile
-// O_APPEND syscall remains atomic even when concurrent hook invocations
-// from sibling Claude sessions race on the same log file. The `reason`
-// field is the only one that can realistically grow — it carries codex
-// stderr, parse errors, ignore-rule matches, etc. Other fields (timestamp,
-// tool, file, verdict) are bounded by their schemas.
-const MAX_LOG_REASON_BYTES = 3500;
-
-function clampReason(reason) {
-  if (typeof reason !== "string" || reason.length <= MAX_LOG_REASON_BYTES) {
-    return reason;
-  }
-  const dropped = reason.length - MAX_LOG_REASON_BYTES;
-  return `${reason.slice(0, MAX_LOG_REASON_BYTES)}…(${dropped}b truncated)`;
-}
-
-async function appendLog(markerDir, entry) {
-  const logPath = join(markerDir, LOG_FILENAME);
-  const safe = entry?.reason !== undefined ? { ...entry, reason: clampReason(entry.reason) } : entry;
-  try {
-    await appendFile(logPath, `${JSON.stringify(safe)}\n`);
-  } catch {
-    // logging failures must never break Claude's flow
-    return;
-  }
-  await rotateLogIfNeeded(logPath);
-}
+// Cache + log helpers (computeCacheKey/cachePathFor/getCachedConcerns/
+// setCachedConcerns/evictCacheOldest/rotateLogIfNeeded/clampReason/appendLog)
+// all live in ./lib/state.mjs.
 
 // Build codex CLI args. Mirrors packages/codex-mcp/src/utils/codexExecutor.ts
 // `buildArgs` for the no-session, stdin-prompt case (hook always passes prompt

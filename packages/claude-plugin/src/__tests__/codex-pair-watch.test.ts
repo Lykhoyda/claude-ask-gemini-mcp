@@ -9,6 +9,9 @@ const HOOK_PATH = path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs");
 
 describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () => {
   const script = readFile("scripts/codex-pair-watch.mjs");
+  // ADR-088: state helpers now live in lib/state.mjs. Tests that previously
+  // grepped the hook source for state symbols now read this instead.
+  const libState = readFile("scripts/lib/state.mjs");
 
   it("the script file is executable", () => {
     const stats = fs.statSync(HOOK_PATH);
@@ -101,37 +104,38 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/WATCHED_TOOLS.*Edit.*Write.*MultiEdit/s);
   });
 
-  // Phase 1 item #1: log rotation
+  // Phase 1 item #1: log rotation (now in lib/state.mjs per ADR-088)
   it("caps log growth via CODEX_PAIR_MAX_LOG_BYTES env var (default 2_000_000) and MAX_LOG_ENTRIES", () => {
-    expect(script).toMatch(/CODEX_PAIR_MAX_LOG_BYTES/);
-    expect(script).toMatch(/2_000_000|2000000/);
-    expect(script).toMatch(/MAX_LOG_ENTRIES/);
-    expect(script).toMatch(/rotateLogIfNeeded/);
+    expect(libState).toMatch(/CODEX_PAIR_MAX_LOG_BYTES/);
+    expect(libState).toMatch(/2_000_000|2000000/);
+    expect(libState).toMatch(/MAX_LOG_ENTRIES/);
+    expect(libState).toMatch(/rotateLogIfNeeded/);
     // atomic rewrite pattern: writeFile to .tmp, then rename
-    expect(script).toMatch(/writeFile.*\.tmp/s);
-    expect(script).toMatch(/rename\(/);
+    expect(libState).toMatch(/writeFile.*\.tmp/s);
+    expect(libState).toMatch(/rename\(/);
   });
 
   it("rotation failures must never throw — wrapped in try/catch with silent no-op", () => {
-    const rotateBlock = script.match(/async function rotateLogIfNeeded[\s\S]*?^}/m);
+    const rotateBlock = libState.match(/export async function rotateLogIfNeeded[\s\S]*?^}/m);
     expect(rotateBlock).toBeTruthy();
     expect(rotateBlock?.[0]).toMatch(/try\s*\{/);
     expect(rotateBlock?.[0]).toMatch(/catch\s*\{/);
   });
 
-  // Phase 1 item #2: structured verdicts
-  it("declares the closed verdict set via VERDICT_PREFIXES table", () => {
-    const tableBlock = script.match(/const VERDICT_PREFIXES\s*=\s*\{[\s\S]*?\};/);
-    expect(tableBlock).toBeTruthy();
-    const t = tableBlock?.[0] ?? "";
-    expect(t).toMatch(/none:\s*["']OK["']/);
-    expect(t).toMatch(/concerns:\s*["']WARN["']/);
-    expect(t).toMatch(/skipped:\s*["']SKIP["']/);
-    expect(t).toMatch(/error:\s*["']ERROR["']/);
-    expect(t).toMatch(/spawn_failed:\s*["']SPAWN_FAILED["']/);
-    expect(t).toMatch(/timeout:\s*["']TIMEOUT["']/);
-    expect(t).toMatch(/parse_failed:\s*["']PARSE_FAILED["']/);
-    expect(t).toMatch(/cached:\s*["']CACHED["']/);
+  // Phase 1 item #2: structured verdicts. ADR-088 moves VERDICT_PREFIXES
+  // to lib/parser.mjs — assert the closed verdict set via real import.
+  it("declares the closed verdict set via VERDICT_PREFIXES table (ADR-088)", async () => {
+    const { VERDICT_PREFIXES } = await import("../../scripts/lib/parser.mjs");
+    expect(VERDICT_PREFIXES).toMatchObject({
+      none: "OK",
+      concerns: "WARN",
+      skipped: "SKIP",
+      error: "ERROR",
+      spawn_failed: "SPAWN_FAILED",
+      timeout: "TIMEOUT",
+      parse_failed: "PARSE_FAILED",
+      cached: "CACHED",
+    });
   });
 
   it("tags spawnCodex rejections with verdict metadata (taggedError)", () => {
@@ -144,36 +148,58 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/taggedError\([^,]+,\s*["']error["']\)/);
   });
 
-  it("systemMessage prefix is derived from VERDICT_PREFIXES, not hardcoded ERROR", () => {
-    // The main() catch resolves verdict via verdictFromError and looks up prefix.
+  it("systemMessage prefix is derived from VERDICT_PREFIXES, not hardcoded (ADR-088)", async () => {
+    // The hook's main() catch still resolves verdict via verdictFromError.
     expect(script).toMatch(/verdictFromError/);
-    // buildVerdictMessage routes both OK and WARN through the table
-    const verdictMsgBlock = script.match(/function buildVerdictMessage[\s\S]*?^\}\s*$/m);
-    expect(verdictMsgBlock).toBeTruthy();
-    expect(verdictMsgBlock?.[0]).toMatch(/VERDICT_PREFIXES\.none/);
-    expect(verdictMsgBlock?.[0]).toMatch(/VERDICT_PREFIXES\.concerns/);
+    // buildVerdictMessage now lives in lib/parser.mjs — test the output shape
+    // for both none and concerns paths instead of regex-ing on the source.
+    const { buildVerdictMessage } = await import("../../scripts/lib/parser.mjs");
+    const okMsg = buildVerdictMessage({
+      filePath: "/x.ts",
+      concerns: { high: [], med: [], low: [] },
+      fellBack: false,
+      durationMs: 1000,
+      surfaceThreshold: "med",
+      cached: false,
+    });
+    expect(okMsg).toMatch(/^codex-pair OK:/);
+    const warnMsg = buildVerdictMessage({
+      filePath: "/x.ts",
+      concerns: { high: ["H"], med: [], low: [] },
+      fellBack: false,
+      durationMs: 1000,
+      surfaceThreshold: "med",
+      cached: false,
+    });
+    expect(warnMsg).toMatch(/^codex-pair WARN:/);
   });
 
-  // Phase 2 item #5: YAML frontmatter config + threshold-aware surfacing
-  it("declares valid surface thresholds (high|med|low) with med as the default", () => {
-    expect(script).toMatch(/VALID_THRESHOLDS/);
-    expect(script).toMatch(/DEFAULT_SURFACE_THRESHOLD\s*=\s*["']med["']/);
-    expect(script).toMatch(/["']high["']/);
-    expect(script).toMatch(/["']med["']/);
-    expect(script).toMatch(/["']low["']/);
+  // Phase 2 item #5: YAML frontmatter config + threshold-aware surfacing.
+  // ADR-088 moves the threshold constants to lib/parser.mjs.
+  it("declares valid surface thresholds (high|med|low) with med as the default (ADR-088)", async () => {
+    const { VALID_THRESHOLDS, DEFAULT_SURFACE_THRESHOLD } = await import("../../scripts/lib/parser.mjs");
+    expect(VALID_THRESHOLDS.has("high")).toBe(true);
+    expect(VALID_THRESHOLDS.has("med")).toBe(true);
+    expect(VALID_THRESHOLDS.has("low")).toBe(true);
+    expect(VALID_THRESHOLDS.size).toBe(3);
+    expect(DEFAULT_SURFACE_THRESHOLD).toBe("med");
   });
 
-  it("buildVerdictMessage gates LOW behind surfaceThreshold === 'low' (ADR-077 opt-up)", () => {
-    const verdictBlock = script.match(/function buildVerdictMessage[\s\S]*?^\}\s*$/m);
-    expect(verdictBlock).toBeTruthy();
-    const body = verdictBlock?.[0] ?? "";
-    // HIGH must surface unconditionally (no threshold check around it)
-    expect(body).toMatch(/concerns\.high/);
-    // MED gated at "med" OR "low"
-    expect(body).toMatch(/threshold\s*===\s*["']med["']\s*\|\|\s*threshold\s*===\s*["']low["']/);
-    // LOW only inside a `threshold === "low"` block
-    const lowBlockPattern = /if\s*\(\s*threshold\s*===\s*["']low["']\s*\)\s*\{[\s\S]*?concerns\.low/;
-    expect(body).toMatch(lowBlockPattern);
+  it("buildVerdictMessage gates LOW behind surfaceThreshold === 'low' (ADR-077 opt-up, ADR-088 unit test)", async () => {
+    const { buildVerdictMessage } = await import("../../scripts/lib/parser.mjs");
+    const concerns = { high: ["H"], med: ["M"], low: ["L"] };
+    const base = { filePath: "/x.ts", concerns, fellBack: false, durationMs: 1000, cached: false };
+    // HIGH always surfaces
+    expect(buildVerdictMessage({ ...base, surfaceThreshold: "high" })).toMatch(/\[HIGH\]/);
+    expect(buildVerdictMessage({ ...base, surfaceThreshold: "high" })).not.toMatch(/\[MED\]/);
+    expect(buildVerdictMessage({ ...base, surfaceThreshold: "high" })).not.toMatch(/\[LOW\]/);
+    // MED surfaces at med or low
+    expect(buildVerdictMessage({ ...base, surfaceThreshold: "med" })).toMatch(/\[MED\]/);
+    expect(buildVerdictMessage({ ...base, surfaceThreshold: "med" })).not.toMatch(/\[LOW\]/);
+    // LOW only at threshold low
+    expect(buildVerdictMessage({ ...base, surfaceThreshold: "low" })).toMatch(/\[LOW\]/);
+    // Counts line always shows all three numbers
+    expect(buildVerdictMessage({ ...base, surfaceThreshold: "high" })).toMatch(/1H \/ 1M \/ 1L/);
   });
 
   it("parses YAML frontmatter from the marker file (zero-dep parser)", () => {
@@ -321,35 +347,39 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(body).toMatch(/return null/);
   });
 
-  // Phase 3 item #8: content-hash cache
+  // Phase 3 item #8: content-hash cache (now in lib/state.mjs per ADR-088).
   it("declares cache config (.codex-pair-cache dir, 10min TTL, 50-entry cap)", () => {
-    expect(script).toMatch(/CACHE_DIR\s*=\s*["']\.codex-pair-cache["']/);
-    expect(script).toMatch(/CACHE_TTL_MS\s*=\s*10\s*\*\s*60\s*\*\s*1000/);
-    expect(script).toMatch(/CACHE_MAX_ENTRIES\s*=\s*50/);
+    expect(libState).toMatch(/CACHE_DIR\s*=\s*["']\.codex-pair-cache["']/);
+    expect(libState).toMatch(/CACHE_TTL_MS\s*=\s*10\s*\*\s*60\s*\*\s*1000/);
+    expect(libState).toMatch(/CACHE_MAX_ENTRIES\s*=\s*50/);
   });
 
-  it("cache key includes model + prompt + fileContent + surfaceThreshold (the four invalidation inputs)", () => {
-    const block = script.match(/function computeCacheKey[\s\S]*?^}/m);
-    expect(block).toBeTruthy();
-    const body = block?.[0] ?? "";
-    expect(body).toMatch(/createHash\(["']sha256["']\)/);
-    expect(body).toMatch(/\.update\(model\)/);
-    expect(body).toMatch(/\.update\(prompt\)/);
-    expect(body).toMatch(/\.update\(fileContent\)/);
-    expect(body).toMatch(/\.update\(surfaceThreshold\)/);
-    expect(body).toMatch(/digest\(["']hex["']\)/);
+  it("cache key includes model + prompt + fileContent + surfaceThreshold (ADR-088 unit test)", async () => {
+    const { computeCacheKey } = await import("../../scripts/lib/state.mjs");
+    const base = { model: "gpt-5.5", prompt: "p", fileContent: "c", surfaceThreshold: "med" };
+    const k1 = computeCacheKey(base);
+    expect(k1).toHaveLength(64); // sha256 hex
+    // Different model → different key
+    expect(computeCacheKey({ ...base, model: "gpt-5.5-mini" })).not.toBe(k1);
+    // Different prompt → different key
+    expect(computeCacheKey({ ...base, prompt: "p2" })).not.toBe(k1);
+    // Different fileContent → different key
+    expect(computeCacheKey({ ...base, fileContent: "c2" })).not.toBe(k1);
+    // Different threshold → different key
+    expect(computeCacheKey({ ...base, surfaceThreshold: "low" })).not.toBe(k1);
+    // Same inputs → same key (determinism)
+    expect(computeCacheKey(base)).toBe(k1);
   });
 
-  it("cache path layout uses 2-char prefix sharding", () => {
-    const block = script.match(/function cachePathFor[\s\S]*?^}/m);
-    expect(block).toBeTruthy();
-    const body = block?.[0] ?? "";
-    expect(body).toMatch(/cacheKey\.slice\(0,\s*2\)/);
-    expect(body).toMatch(/cacheKey\.slice\(2\)/);
+  it("cache path layout uses 2-char prefix sharding (ADR-088 unit test)", async () => {
+    const { cachePathFor } = await import("../../scripts/lib/state.mjs");
+    const cacheKey = "abcdef0123456789".padEnd(64, "0");
+    const p = cachePathFor("/marker", cacheKey);
+    expect(p).toMatch(/\.codex-pair-cache[\\/]ab[\\/]cdef0123456789/);
   });
 
   it("getCachedConcerns enforces mtime-based TTL", () => {
-    const block = script.match(/async function getCachedConcerns[\s\S]*?^}/m);
+    const block = libState.match(/export async function getCachedConcerns[\s\S]*?^}/m);
     expect(block).toBeTruthy();
     const body = block?.[0] ?? "";
     expect(body).toMatch(/mtimeMs/);
@@ -357,7 +387,7 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
   });
 
   it("evictCacheOldest sorts by mtime and unlinks the excess", () => {
-    const block = script.match(/async function evictCacheOldest[\s\S]*?^}/m);
+    const block = libState.match(/export async function evictCacheOldest[\s\S]*?^}/m);
     expect(block).toBeTruthy();
     const body = block?.[0] ?? "";
     expect(body).toMatch(/sort\(\(a,\s*b\)\s*=>\s*a\.mtimeMs\s*-\s*b\.mtimeMs\)/);
@@ -459,12 +489,26 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(cli).toMatch(/function findMarkerUp/);
   });
 
-  it("buildVerdictMessage emits [cached] suffix when cached:true", () => {
-    const block = script.match(/function buildVerdictMessage[\s\S]*?^\}\s*$/m);
-    expect(block).toBeTruthy();
-    const body = block?.[0] ?? "";
-    expect(body).toMatch(/cachedTag/);
-    expect(body).toMatch(/["']\s*\[cached\]\s*["']/);
+  it("buildVerdictMessage emits [cached] suffix when cached:true (ADR-088 unit test)", async () => {
+    const { buildVerdictMessage } = await import("../../scripts/lib/parser.mjs");
+    const cached = buildVerdictMessage({
+      filePath: "/x.ts",
+      concerns: { high: [], med: [], low: [] },
+      fellBack: false,
+      durationMs: 1000,
+      surfaceThreshold: "med",
+      cached: true,
+    });
+    expect(cached).toMatch(/\[cached\]/);
+    const fresh = buildVerdictMessage({
+      filePath: "/x.ts",
+      concerns: { high: [], med: [], low: [] },
+      fellBack: false,
+      durationMs: 1000,
+      surfaceThreshold: "med",
+      cached: false,
+    });
+    expect(fresh).not.toMatch(/\[cached\]/);
   });
 
   it("main() invokes ignore-check between SKIP_PATTERNS and frontmatter parse, no systemMessage on match", () => {
@@ -561,29 +605,50 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/\.png/);
   });
 
-  it("parses HIGH/MED/LOW labels from codex output", () => {
-    expect(script).toMatch(/\[HIGH\]/);
-    expect(script).toMatch(/\[MED\]/);
-    expect(script).toMatch(/\[LOW\]/);
-    expect(script).toMatch(/parseConcerns/);
+  it("parses HIGH/MED/LOW labels from codex output (ADR-088 unit test)", async () => {
+    const { parseConcerns, parseConcernsLegacy, parseConcernsJson } = await import("../../scripts/lib/parser.mjs");
+    // Legacy free-form format (ADR-077 → safety net)
+    const legacy = "[HIGH] critical issue\n[MED] watch this\n[LOW] style nit";
+    const legacyResult = parseConcernsLegacy(legacy);
+    expect(legacyResult.high).toHaveLength(1);
+    expect(legacyResult.med).toHaveLength(1);
+    expect(legacyResult.low).toHaveLength(1);
+    // Modern JSON contract (ADR-083)
+    const jsonResult = parseConcernsJson(
+      JSON.stringify({
+        verdict: "needs-attention",
+        findings: [{ severity: "high", title: "T", body: "B", file: "a.ts", line_start: 1 }],
+      }),
+    );
+    expect(jsonResult?.high).toHaveLength(1);
+    // The router prefers JSON, falls back to legacy
+    expect(parseConcerns("NONE")).toEqual({ high: [], med: [], low: [] });
+    expect(parseConcerns(legacy).high).toHaveLength(1);
   });
 
-  it("surfaces HIGH+MED via systemMessage stdout, suppresses LOW (threshold in hook, not prompt)", () => {
-    // The threshold-in-hook design is load-bearing per ADR-077. The surface
-    // moved from stderr to a JSON systemMessage on stdout so Claude Code can
-    // render it as an inline UI notice instead of a stderr warning.
+  it("surfaces HIGH+MED via systemMessage stdout, suppresses LOW (ADR-077/ADR-088)", async () => {
+    // The threshold-in-hook design is load-bearing per ADR-077. ADR-088
+    // moved buildVerdictMessage to lib/parser.mjs but the hook still wires
+    // the call: buildVerdictMessage(...) → emitSystemMessage(...).
     expect(script).toMatch(/buildVerdictMessage/);
     expect(script).toMatch(/emitSystemMessage/);
     expect(script).toMatch(/systemMessage/);
 
-    const verdictBlock = script.match(/function buildVerdictMessage[\s\S]*?^\}\s*$/m);
-    expect(verdictBlock).toBeTruthy();
-    expect(verdictBlock?.[0]).toMatch(/concerns\.high.*HIGH/s);
-    expect(verdictBlock?.[0]).toMatch(/concerns\.med.*MED/s);
-    // LOW details must NOT be expanded into the surfaced body. A count
-    // mention (e.g. "0L") is fine — it nudges the user to check the log —
-    // but `concerns.low.map(...)` would surface the actual concern text.
-    expect(verdictBlock?.[0]).not.toMatch(/concerns\.low\.map/);
+    // Real unit test: at the default threshold (med), LOW concerns are
+    // counted in the header but NOT expanded in the body.
+    const { buildVerdictMessage } = await import("../../scripts/lib/parser.mjs");
+    const msg = buildVerdictMessage({
+      filePath: "/x.ts",
+      concerns: { high: ["high-body"], med: ["med-body"], low: ["low-body"] },
+      fellBack: false,
+      durationMs: 1000,
+      surfaceThreshold: "med",
+      cached: false,
+    });
+    expect(msg).toMatch(/high-body/);
+    expect(msg).toMatch(/med-body/);
+    expect(msg).not.toMatch(/low-body/);
+    expect(msg).toMatch(/1L/); // count line still shows the LOW count
   });
 
   it("emits hook JSON to stdout (continue:true + systemMessage) instead of stderr", () => {
@@ -595,9 +660,10 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).not.toMatch(/process\.stderr\.write/);
   });
 
-  it("logs every call to .codex-pair-log.jsonl", () => {
-    expect(script).toMatch(/codex-pair-log\.jsonl/);
-    expect(script).toMatch(/appendLog/);
+  it("logs every call to .codex-pair-log.jsonl (ADR-088: helper in lib/state.mjs)", () => {
+    expect(libState).toMatch(/codex-pair-log\.jsonl/);
+    expect(libState).toMatch(/export async function appendLog/);
+    expect(script).toMatch(/appendLog/); // hook calls the imported helper
   });
 
   it("never throws uncaught — has main().catch(...) wrapper", () => {
@@ -1454,14 +1520,17 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
   // Structural tests pin both surfaces; the timeout functional test exercises
   // the POSIX path end-to-end via the fake-codex `timeout` scenario.
 
-  it("ADR-084: hook source defines terminateProcessTree helper with POSIX + Windows branches", () => {
+  it("ADR-084/088: lib/process.mjs defines terminateProcessTree helper with POSIX + Windows branches", () => {
+    const libText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "process.mjs"), "utf-8");
+    expect(libText).toMatch(/export function terminateProcessTree/);
+    expect(libText).toMatch(/process\.kill\(-child\.pid/);
+    expect(libText).toMatch(/taskkill/);
+    expect(libText).toMatch(/['"]\/t['"]/i);
+    expect(libText).toMatch(/['"]\/f['"]/i);
+    // The spawn-with-detached call sites still live in the hook script.
     const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
-    expect(scriptText).toMatch(/function terminateProcessTree/);
-    expect(scriptText).toMatch(/process\.kill\(-child\.pid/);
-    expect(scriptText).toMatch(/taskkill/);
-    expect(scriptText).toMatch(/['"]\/t['"]/i);
-    expect(scriptText).toMatch(/['"]\/f['"]/i);
     expect(scriptText).toMatch(/detached:\s*!IS_WINDOWS/);
+    expect(scriptText).toMatch(/from "\.\/lib\/process\.mjs"/);
   });
 
   it("ADR-084: spawnCodex timeout path triggers process-tree termination (uses terminateProcessTree)", () => {
@@ -1511,12 +1580,12 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
   // Structural pin on the helper + two runtime tests (paused → skipped,
   // sentinel removal → normal review attempt).
 
-  it("ADR-085: hook source defines isPaused helper and constants", () => {
-    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
-    expect(scriptText).toMatch(/const PAUSE_STATE_DIR\s*=\s*"\.codex-pair-state"/);
-    expect(scriptText).toMatch(/const PAUSE_SENTINEL_FILE\s*=\s*"paused"/);
-    expect(scriptText).toMatch(/function isPaused\(markerDir\)/);
-    expect(scriptText).toMatch(/statSync\(join\(markerDir,\s*PAUSE_STATE_DIR,\s*PAUSE_SENTINEL_FILE\)\)/);
+  it("ADR-085/088: lib/state.mjs defines isPaused helper and constants", () => {
+    const libStateText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "state.mjs"), "utf-8");
+    expect(libStateText).toMatch(/const PAUSE_STATE_DIR\s*=\s*"\.codex-pair-state"/);
+    expect(libStateText).toMatch(/const PAUSE_SENTINEL_FILE\s*=\s*"paused"/);
+    expect(libStateText).toMatch(/export function isPaused\(markerDir\)/);
+    expect(libStateText).toMatch(/statSync\(join\(markerDir,\s*PAUSE_STATE_DIR,\s*PAUSE_SENTINEL_FILE\)\)/);
   });
 
   it("ADR-085: paused sentinel makes hook exit silently with verdict:skipped log entry", () => {
@@ -1583,9 +1652,9 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
   // for atomic O_APPEND semantics. Structural pins on both surfaces;
   // a sizing test confirms the clamp keeps the full log envelope safe.
 
-  it("ADR-086: setCachedConcerns uses tmp + rename for atomic cache writes", () => {
-    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
-    const block = scriptText.match(/async function setCachedConcerns[\s\S]*?\n\}/);
+  it("ADR-086/088: setCachedConcerns uses tmp + rename for atomic cache writes", () => {
+    const libStateText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "state.mjs"), "utf-8");
+    const block = libStateText.match(/export async function setCachedConcerns[\s\S]*?\n\}/);
     expect(block).toBeTruthy();
     expect(block?.[0]).toMatch(/\.tmp\.\$\{process\.pid\}/);
     expect(block?.[0]).toMatch(/await writeFile\(tmpPath/);
@@ -1594,30 +1663,29 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(block?.[0]).not.toMatch(/writeFile\(cachePath,/);
   });
 
-  it("ADR-086: appendLog routes through clampReason to bound entry size", () => {
-    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
-    expect(scriptText).toMatch(/const MAX_LOG_REASON_BYTES\s*=\s*3500/);
-    expect(scriptText).toMatch(/function clampReason\(reason\)/);
-    const block = scriptText.match(/async function appendLog[\s\S]*?\n\}/);
-    expect(block).toBeTruthy();
-    expect(block?.[0]).toMatch(/clampReason\(entry\.reason\)/);
+  it("ADR-086/088: appendLog routes reason through clampReason (real unit test)", async () => {
+    const { clampReason } = await import("../../scripts/lib/state.mjs");
+    // Short reason passes through unchanged
+    expect(clampReason("short")).toBe("short");
+    // Oversize gets truncated with marker
+    const oversize = "x".repeat(10_000);
+    const clamped = clampReason(oversize);
+    expect(clamped.length).toBeLessThan(4096);
+    expect(clamped).toMatch(/…\(6500b truncated\)$/);
+    // Non-string passes through
+    expect(clampReason(undefined)).toBeUndefined();
+    expect(clampReason(42 as unknown as string)).toBe(42);
   });
 
-  it("ADR-086: clamp keeps full log envelope under POSIX PIPE_BUF (4096)", () => {
-    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
-    const max = Number(scriptText.match(/MAX_LOG_REASON_BYTES\s*=\s*(\d+)/)?.[1]);
-    expect(max).toBeGreaterThan(0);
-    expect(max).toBeLessThan(4096);
-    // Simulate the clamp output shape and verify a realistic envelope fits.
-    const reason = "x".repeat(10000);
-    const suffix = `…(${reason.length - max}b truncated)`;
+  it("ADR-086/088: clamp keeps full log envelope under POSIX PIPE_BUF (4096)", async () => {
+    const { clampReason } = await import("../../scripts/lib/state.mjs");
     const envelope = JSON.stringify({
       timestamp: "2026-05-19T00:00:00.000Z",
       tool: "Edit",
       file: "/very/long/path/to/some/source/file/in/a/nested/monorepo/package/src/billing/charge.ts",
       verdict: "error",
       level: "warning",
-      reason: "x".repeat(max) + suffix,
+      reason: clampReason("x".repeat(10_000)),
     });
     expect(envelope.length).toBeLessThan(4096);
   });
@@ -1630,16 +1698,17 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
   // Stale-recovery via mtime: a lock older than the TTL gets taken over
   // (covers crashed/SIGKILLed prior owners).
 
-  it("ADR-087: hook source defines inflight-lock surfaces (constants + helpers + main integration)", () => {
-    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
-    expect(scriptText).toMatch(/const INFLIGHT_DIR\s*=\s*"inflight"/);
-    expect(scriptText).toMatch(/const INFLIGHT_TTL_MIN_MS\s*=\s*600_000/);
-    expect(scriptText).toMatch(/function inflightLockPath\(markerDir,\s*filePath\)/);
-    expect(scriptText).toMatch(/function tryAcquireInflightLock\(markerDir,\s*filePath,\s*ttlMs\)/);
-    expect(scriptText).toMatch(/function releaseInflightLock\(lockPath\)/);
+  it("ADR-087/088: inflight-lock surfaces (constants + helpers in lib/state.mjs; main integration in hook)", () => {
+    const libStateText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "state.mjs"), "utf-8");
+    expect(libStateText).toMatch(/const INFLIGHT_DIR\s*=\s*"inflight"/);
+    expect(libStateText).toMatch(/const INFLIGHT_TTL_MIN_MS\s*=\s*600_000/);
+    expect(libStateText).toMatch(/export function inflightLockPath\(markerDir,\s*filePath\)/);
+    expect(libStateText).toMatch(/export function tryAcquireInflightLock\(markerDir,\s*filePath,\s*ttlMs\)/);
+    expect(libStateText).toMatch(/export function releaseInflightLock\(lockPath\)/);
     // Exclusive create
-    expect(scriptText).toMatch(/writeFileSync\(lockPath,\s*String\(process\.pid\),\s*\{\s*flag:\s*"wx"\s*\}\)/);
-    // main() integration + cleanup hook
+    expect(libStateText).toMatch(/writeFileSync\(lockPath,\s*String\(process\.pid\),\s*\{\s*flag:\s*"wx"\s*\}\)/);
+    // main() integration + cleanup hook still live in the hook script.
+    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
     expect(scriptText).toMatch(/tryAcquireInflightLock\(markerDir,\s*filePath,\s*inflightTtlMs\)/);
     expect(scriptText).toMatch(/process\.on\("exit",\s*\(\)\s*=>\s*releaseInflightLock\(acquiredLockPath\)\)/);
   });

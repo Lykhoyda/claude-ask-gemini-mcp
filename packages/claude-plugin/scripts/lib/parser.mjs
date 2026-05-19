@@ -1,0 +1,175 @@
+// Concern parsing + verdict-message formatting (extracted from
+// codex-pair-watch.mjs per ADR-088, originally ADR-077/ADR-083).
+//
+// Pure functions over strings → easy to unit-test. JSON-first parser
+// (ADR-083 contract) with a legacy regex fallback for defense-in-depth.
+
+export const VERDICT_PREFIXES = {
+  none: "OK",
+  concerns: "WARN",
+  skipped: "SKIP",
+  error: "ERROR",
+  spawn_failed: "SPAWN_FAILED",
+  timeout: "TIMEOUT",
+  parse_failed: "PARSE_FAILED",
+  cached: "CACHED",
+};
+
+export const SEVERITY_TO_BUCKET = {
+  high: "high",
+  medium: "med",
+  med: "med",
+  low: "low",
+};
+
+export const VALID_THRESHOLDS = new Set(["high", "med", "low"]);
+export const DEFAULT_SURFACE_THRESHOLD = "med";
+
+export function formatDuration(durationMs) {
+  return `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+// Build the systemMessage payload. `surfaceThreshold` controls which concern
+// levels are expanded into the message body. ADR-077 default keeps LOW in the
+// log only (threshold = "med"). The only opt-up is surfaceThreshold = "low";
+// the count summary line always includes LOW so the user knows LOWs exist.
+export function buildVerdictMessage({
+  filePath,
+  concerns,
+  fellBack,
+  durationMs,
+  surfaceThreshold,
+  cached,
+}) {
+  const threshold = VALID_THRESHOLDS.has(surfaceThreshold)
+    ? surfaceThreshold
+    : DEFAULT_SURFACE_THRESHOLD;
+  const total = concerns.high.length + concerns.med.length + concerns.low.length;
+  const flag = fellBack ? " [fallback model]" : "";
+  const cachedTag = cached ? " [cached]" : "";
+  if (total === 0) {
+    return `codex-pair ${VERDICT_PREFIXES.none}${flag}${cachedTag}: ${filePath} — no concerns (${formatDuration(durationMs)})`;
+  }
+  const counts = `${concerns.high.length}H / ${concerns.med.length}M / ${concerns.low.length}L`;
+  const header = `codex-pair ${VERDICT_PREFIXES.concerns}${flag}${cachedTag}: ${filePath} — ${counts} (${formatDuration(durationMs)})`;
+  const details = [];
+  for (const c of concerns.high) details.push(`[HIGH]\n${c}`);
+  if (threshold === "med" || threshold === "low") {
+    for (const c of concerns.med) details.push(`[MED]\n${c}`);
+  }
+  if (threshold === "low") {
+    for (const c of concerns.low) details.push(`[LOW]\n${c}`);
+  }
+  return details.length > 0 ? `${header}\n\n${details.join("\n\n")}` : header;
+}
+
+// Three-stage JSON extractor: raw parse → strip code fences → walk for the
+// first balanced top-level object (string-aware brace counter).
+export function tryExtractJson(message) {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+  const fenceMatch = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i);
+  if (fenceMatch) {
+    try {
+      return JSON.parse(fenceMatch[1]);
+    } catch {}
+  }
+  const start = trimmed.indexOf("{");
+  if (start !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === "\\" && inString) {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') inString = !inString;
+      else if (!inString && ch === "{") depth++;
+      else if (!inString && ch === "}") {
+        depth--;
+        if (depth === 0) {
+          try {
+            return JSON.parse(trimmed.slice(start, i + 1));
+          } catch {
+            return null;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export function formatFindingBody(finding) {
+  const parts = [];
+  if (typeof finding.title === "string" && finding.title.trim().length > 0) {
+    parts.push(finding.title.trim());
+  }
+  const file = typeof finding.file === "string" ? finding.file.trim() : "";
+  const line = Number.isFinite(finding.line_start) ? `:${finding.line_start}` : "";
+  const body = typeof finding.body === "string" ? finding.body.trim() : "";
+  const fileLine = file ? `${file}${line}` : "";
+  if (fileLine && body) parts.push(`${fileLine}: ${body}`);
+  else if (fileLine) parts.push(fileLine);
+  else if (body) parts.push(body);
+  if (typeof finding.recommendation === "string" && finding.recommendation.trim().length > 0) {
+    parts.push(finding.recommendation.trim());
+  }
+  return parts.join("\n");
+}
+
+export function parseConcernsJson(message) {
+  const obj = tryExtractJson(message);
+  if (!obj || typeof obj !== "object") return null;
+  if (obj.verdict === "clean") {
+    return { high: [], med: [], low: [] };
+  }
+  if (!Array.isArray(obj.findings)) return null;
+  const concerns = { high: [], med: [], low: [] };
+  for (const f of obj.findings) {
+    if (!f || typeof f !== "object") continue;
+    const sev = typeof f.severity === "string" ? f.severity.toLowerCase() : "";
+    const bucket = SEVERITY_TO_BUCKET[sev];
+    if (!bucket) continue;
+    const rendered = formatFindingBody(f);
+    if (rendered.length === 0) continue;
+    concerns[bucket].push(rendered);
+  }
+  return concerns;
+}
+
+export function parseConcernsLegacy(message) {
+  const trimmed = message.trim();
+  const upper = trimmed.toUpperCase();
+  if (upper === "NONE" || upper.startsWith("NONE\n")) {
+    return { high: [], med: [], low: [] };
+  }
+  const parts = trimmed.split(/(?=\[(?:HIGH|MED|LOW)\])/);
+  const concerns = { high: [], med: [], low: [] };
+  for (const part of parts) {
+    const labelMatch = part.match(/^\[(HIGH|MED|LOW)\]/);
+    if (!labelMatch) continue;
+    const body = part.slice(labelMatch[0].length).trim();
+    if (body.length === 0) continue;
+    const label = labelMatch[1].toLowerCase();
+    if (label === "high") concerns.high.push(body);
+    else if (label === "med") concerns.med.push(body);
+    else if (label === "low") concerns.low.push(body);
+  }
+  return concerns;
+}
+
+export function parseConcerns(message) {
+  const fromJson = parseConcernsJson(message);
+  if (fromJson) return fromJson;
+  return parseConcernsLegacy(message);
+}
