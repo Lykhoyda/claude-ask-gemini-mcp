@@ -282,13 +282,25 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).not.toMatch(/verdict:\s*["']skipped["'][\s\S]{0,500}?file too large/);
   });
 
-  it("buildPrompt accepts partialView and emits the partial-view instruction", () => {
-    const block = script.match(/function buildPrompt[\s\S]*?<\/file_content>/m);
-    expect(block).toBeTruthy();
-    const body = block?.[0] ?? "";
-    expect(body).toMatch(/partialView/);
-    expect(body).toMatch(/this is a partial view/i);
-    expect(body).toMatch(/do NOT speculate about omitted code/i);
+  it("buildReviewPrompt emits the partial-view instruction when partialView=true (ADR-089 unit test)", async () => {
+    const { buildReviewPrompt } = await import("../../scripts/lib/prompt.mjs");
+    const withPartial = buildReviewPrompt({
+      filePath: "/x.ts",
+      fileContent: "code",
+      toolName: "Edit",
+      projectContext: "",
+      partialView: true,
+    });
+    expect(withPartial).toMatch(/this is a partial view/i);
+    expect(withPartial).toMatch(/do NOT speculate about omitted code/i);
+    const withoutPartial = buildReviewPrompt({
+      filePath: "/x.ts",
+      fileContent: "code",
+      toolName: "Edit",
+      projectContext: "",
+      partialView: false,
+    });
+    expect(withoutPartial).not.toMatch(/this is a partial view/i);
   });
 
   it("runGitDiff never throws — returns null on any failure path", () => {
@@ -678,19 +690,23 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     }
   });
 
-  it("wraps file content in <file_content> XML tags, not markdown code fences (prompt-injection guard)", () => {
+  it("wraps file content in <file_content> XML tags with untrusted-data guard (ADR-089 unit test)", async () => {
+    const { buildReviewPrompt } = await import("../../scripts/lib/prompt.mjs");
+    const rendered = buildReviewPrompt({
+      filePath: "/x.ts",
+      fileContent: "const x = 1;",
+      toolName: "Edit",
+      projectContext: "",
+      partialView: false,
+    });
     // Markdown ``` fences are escapable by a file that contains a literal ``` line;
     // XML <file_content> tags require the LLM to be tricked twice (close and re-open
     // a tag literally), and the prompt explicitly warns to treat content as untrusted.
-    expect(script).toMatch(/<file_content>/);
-    expect(script).toMatch(/<\/file_content>/);
-    // Anchor on the post-${fileContent} function close so the regex isn't
-    // fooled by example-JSON `}` characters in the prompt body (ADR-083).
-    const buildPromptBlock = script.match(/function buildPrompt[\s\S]*?\$\{fileContent\}[\s\S]*?\n\}/);
-    expect(buildPromptBlock).toBeTruthy();
-    expect(buildPromptBlock?.[0]).toMatch(/untrusted data/i);
-    // Negative: no `${fileContent}` immediately inside a triple-backtick fence
-    expect(buildPromptBlock?.[0]).not.toMatch(/```\s*\n\$\{fileContent\}/);
+    expect(rendered).toMatch(/<file_content>/);
+    expect(rendered).toMatch(/<\/file_content>/);
+    expect(rendered).toMatch(/untrusted data/i);
+    // The content is wrapped in XML tags, NOT inside a markdown fence
+    expect(rendered).toMatch(/<file_content>\nconst x = 1;\n<\/file_content>/);
   });
 });
 
@@ -1783,18 +1799,56 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(coalesced).toBeUndefined();
   });
 
-  it("ADR-083: prompt requests strict JSON shape (no [HIGH]/[MED]/[LOW] labels prescribed)", () => {
-    // Verify the prompt template asks for JSON, not the legacy label format.
-    // The legacy format may still appear in the parser as a safety net, but
-    // the prompt MUST direct codex to emit JSON to keep parse rates high.
-    const scriptText = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
-    expect(scriptText).toMatch(/Output format — strict JSON/);
-    expect(scriptText).toMatch(/"verdict": "clean" \| "needs-attention"/);
-    expect(scriptText).toMatch(/"severity": "high" \| "medium" \| "low"/);
-    // The prompt body must NOT prescribe the [HIGH]/[MED]/[LOW] label format
-    // as the answer shape. (It may still mention HIGH/MED/LOW for grading.)
-    const buildPromptBlock = scriptText.match(/function buildPrompt[\s\S]*?\$\{fileContent\}[\s\S]*?\n\}/);
-    expect(buildPromptBlock).toBeTruthy();
-    expect(buildPromptBlock?.[0]).not.toMatch(/\[HIGH\] <one-line summary>/);
+  it("ADR-083/089: prompt template requests strict JSON, not [HIGH]/[MED]/[LOW] labels", async () => {
+    // The template now lives at prompts/review.txt. Assert against the
+    // rendered output (the actual prompt codex sees) instead of regex-on-script.
+    const { buildReviewPrompt } = await import("../../scripts/lib/prompt.mjs");
+    const rendered = buildReviewPrompt({
+      filePath: "/x.ts",
+      fileContent: "const x = 1;",
+      toolName: "Edit",
+      projectContext: "",
+      partialView: false,
+    });
+    expect(rendered).toMatch(/Output format — strict JSON/);
+    expect(rendered).toMatch(/"verdict": "clean" \| "needs-attention"/);
+    expect(rendered).toMatch(/"severity": "high" \| "medium" \| "low"/);
+    expect(rendered).not.toMatch(/\[HIGH\] <one-line summary>/);
+  });
+
+  // ADR-089: golden test. The cache key (ADR-082) hashes the rendered prompt;
+  // moving the template across PRs MUST NOT change the rendered bytes or
+  // every cached entry invalidates on rollout. Assert byte-equality against
+  // a frozen fixture.
+
+  it("ADR-089: rendered prompt is byte-identical to the golden fixture (preserves cache keys)", async () => {
+    const { buildReviewPrompt } = await import("../../scripts/lib/prompt.mjs");
+    const goldenPath = path.join(PLUGIN_ROOT, "src", "__tests__", "_fixtures", "review-prompt.golden.txt");
+    const golden = fs.readFileSync(goldenPath, "utf-8");
+    const rendered = buildReviewPrompt({
+      filePath: "src/billing/charge.ts",
+      fileContent: "export function charge(amount: number) {\n  return amount * 1.08;\n}\n",
+      toolName: "Edit",
+      projectContext: "This is a payment service. Currency must use integer cents.",
+      partialView: false,
+    });
+    expect(rendered).toBe(golden);
+  });
+
+  it("ADR-089: empty projectContext omits the project-context block (no leading whitespace artifact)", async () => {
+    const { buildReviewPrompt } = await import("../../scripts/lib/prompt.mjs");
+    const rendered = buildReviewPrompt({
+      filePath: "/x.ts",
+      fileContent: "code",
+      toolName: "Edit",
+      projectContext: "",
+      partialView: false,
+    });
+    expect(rendered).not.toMatch(/## Project context/);
+    // The body should still flow naturally — no double-blank-line artifacts where
+    // the context block used to be.
+    expect(rendered).toMatch(
+      /Don't try to be polite or balanced — your job is to surface what's actually wrong or risky\.\n\n## Output format/,
+    );
   });
 });
