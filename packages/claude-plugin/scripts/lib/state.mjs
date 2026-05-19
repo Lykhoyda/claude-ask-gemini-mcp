@@ -11,7 +11,7 @@
 // entries are clamped under PIPE_BUF for atomic appendFile O_APPEND.
 
 import { appendFile, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
-import { mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 
@@ -61,13 +61,38 @@ export function tryAcquireInflightLock(markerDir, filePath, ttlMs) {
       return { acquired: false, lockPath, reason: "error" };
     }
   }
+  // Lock exists. Multi-review (ADR-091) caught a TOCTOU: a blind
+  // unlink-after-stat can delete a FRESH lock that another concurrent
+  // process wrote between our stat and our unlink. Defense: capture an
+  // identity snapshot (mtime + PID content) before deciding the lock is
+  // stale, then re-verify the identity right before unlinking. If
+  // anyone refreshed it, treat as in-flight.
+  let snapshot;
   try {
     const stats = statSync(lockPath);
     if (Date.now() - stats.mtimeMs <= ttlMs) {
       return { acquired: false, lockPath, reason: "in-flight" };
     }
+    snapshot = { mtimeMs: stats.mtimeMs, pid: readFileSync(lockPath, "utf8") };
   } catch {
     // Lock vanished between EEXIST and stat — retry the create
+    try {
+      writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+      return { acquired: true, lockPath, recoveredStale: true };
+    } catch {
+      return { acquired: false, lockPath, reason: "race" };
+    }
+  }
+  // Re-verify identity right before unlinking; if mtime or PID changed,
+  // another actor refreshed the lock and we must back off.
+  try {
+    const recheck = statSync(lockPath);
+    const recheckPid = readFileSync(lockPath, "utf8");
+    if (recheck.mtimeMs !== snapshot.mtimeMs || recheckPid !== snapshot.pid) {
+      return { acquired: false, lockPath, reason: "in-flight" };
+    }
+  } catch {
+    // Vanished between snapshot and recheck — fall through to retry create
   }
   try {
     unlinkSync(lockPath);
@@ -188,7 +213,10 @@ export async function rotateLogIfNeeded(logPath) {
     const lines = content.split("\n").filter((l) => l.length > 0);
     if (lines.length <= MAX_LOG_ENTRIES) return;
     const tail = lines.slice(-MAX_LOG_ENTRIES);
-    const tmpPath = `${logPath}.tmp`;
+    // PID-scoped tmp prevents concurrent rotations from torn-writing the
+    // same tmp file (multi-review finding). Mirrors setCachedConcerns at
+    // L136. ADR-091 documents the fix.
+    const tmpPath = `${logPath}.tmp.${process.pid}`;
     await writeFile(tmpPath, `${tail.join("\n")}\n`);
     await rename(tmpPath, logPath);
   } catch {
@@ -197,11 +225,20 @@ export async function rotateLogIfNeeded(logPath) {
 }
 
 export function clampReason(reason) {
-  if (typeof reason !== "string" || reason.length <= MAX_LOG_REASON_BYTES) {
-    return reason;
-  }
-  const dropped = reason.length - MAX_LOG_REASON_BYTES;
-  return `${reason.slice(0, MAX_LOG_REASON_BYTES)}…(${dropped}b truncated)`;
+  if (typeof reason !== "string") return reason;
+  // Use UTF-8 BYTE length, not JS char length — ADR-086's PIPE_BUF (4096)
+  // atomicity contract is in bytes. Multi-review (ADR-091) flagged that
+  // multibyte reasons (Cyrillic identifiers, em-dashes, accented filenames
+  // in codex stderr) would slip past a char-count threshold.
+  const byteLen = Buffer.byteLength(reason, "utf8");
+  if (byteLen <= MAX_LOG_REASON_BYTES) return reason;
+  // Slice the UTF-8 buffer, backing off any continuation bytes (high bits
+  // 10xxxxxx) so we don't cut mid-codepoint and produce a U+FFFD.
+  const buf = Buffer.from(reason, "utf8");
+  let end = MAX_LOG_REASON_BYTES;
+  while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+  const dropped = byteLen - end;
+  return `${buf.subarray(0, end).toString("utf8")}…(${dropped}b truncated)`;
 }
 
 export async function appendLog(markerDir, entry) {

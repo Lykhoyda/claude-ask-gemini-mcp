@@ -1679,21 +1679,31 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(block?.[0]).not.toMatch(/writeFile\(cachePath,/);
   });
 
-  it("ADR-086/088: appendLog routes reason through clampReason (real unit test)", async () => {
+  it("ADR-086/088/091: appendLog routes reason through clampReason with UTF-8 byte accounting", async () => {
     const { clampReason } = await import("../../scripts/lib/state.mjs");
     // Short reason passes through unchanged
     expect(clampReason("short")).toBe("short");
-    // Oversize gets truncated with marker
+    // Oversize ASCII gets truncated with byte-count marker
     const oversize = "x".repeat(10_000);
     const clamped = clampReason(oversize);
-    expect(clamped.length).toBeLessThan(4096);
+    expect(Buffer.byteLength(clamped, "utf8")).toBeLessThan(4096);
     expect(clamped).toMatch(/…\(6500b truncated\)$/);
     // Non-string passes through
     expect(clampReason(undefined)).toBeUndefined();
     expect(clampReason(42 as unknown as string)).toBe(42);
+    // ADR-091: multibyte content — Cyrillic + em-dash + accented chars.
+    // Each Cyrillic char is 2 bytes in UTF-8; an em-dash is 3 bytes.
+    // The clamp must use byte length, not char length, to honor PIPE_BUF.
+    const multibyte = "ё".repeat(3000); // 2 bytes each = 6000 UTF-8 bytes
+    const clampedMb = clampReason(multibyte);
+    expect(Buffer.byteLength(clampedMb, "utf8")).toBeLessThan(4096);
+    // The dropped count must report BYTES, not chars
+    const droppedMatch = clampedMb.match(/…\((\d+)b truncated\)$/);
+    expect(droppedMatch).toBeTruthy();
+    expect(Number(droppedMatch?.[1])).toBeGreaterThan(2000); // at least ~2500 bytes dropped
   });
 
-  it("ADR-086/088: clamp keeps full log envelope under POSIX PIPE_BUF (4096)", async () => {
+  it("ADR-086/088/091: clamp keeps full log envelope under POSIX PIPE_BUF (4096 bytes)", async () => {
     const { clampReason } = await import("../../scripts/lib/state.mjs");
     const envelope = JSON.stringify({
       timestamp: "2026-05-19T00:00:00.000Z",
@@ -1703,7 +1713,8 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
       level: "warning",
       reason: clampReason("x".repeat(10_000)),
     });
-    expect(envelope.length).toBeLessThan(4096);
+    // UTF-8 byte length is the actual PIPE_BUF contract.
+    expect(Buffer.byteLength(envelope, "utf8")).toBeLessThan(4096);
   });
 
   // ADR-087: per-file inflight lock for debounce/coalesce.
@@ -1879,7 +1890,10 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
       process.env.ASK_CODEX_BROKER = "";
       expect(isBrokerEnabled("/anything")).toBe(false);
     } finally {
-      if (original === undefined) process.env.ASK_CODEX_BROKER = undefined;
+      // `process.env.X = undefined` coerces to the literal string "undefined"
+      // (Node behavior). Use `delete` to actually unset the variable.
+      // Multi-review finding; ADR-091.
+      if (original === undefined) delete process.env.ASK_CODEX_BROKER;
       else process.env.ASK_CODEX_BROKER = original;
     }
   });
