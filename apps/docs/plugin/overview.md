@@ -51,9 +51,10 @@ This gives you `gemini:ask-gemini` rather than `plugin:ask-llm:gemini:ask-gemini
 | `/brainstorm` | Multi + Claude Opus | Claude Opus researches the topic against real files in parallel with external providers, then synthesizes findings |
 | `/brainstorm-all` | All + Claude Opus | Brainstorm with all three external providers plus Claude Opus research |
 | `/compare` | Multi (configurable) | Side-by-side raw responses from selected providers — no synthesis, no consensus extraction. Use when you want to see how each provider phrases the same answer |
-| `codex-pair` *(hook, not slash command)* | Codex | **Opt-in continuous review.** Runs after every Edit/Write/MultiEdit when a `.codex-pair/context.md` marker file is present in the project. Complementary to `/codex-review` — see [Hooks](/plugin/hooks#posttooluse-hook-codex-pair-opt-in-continuous-review) |
 
 > `/codex-review`, `/ollama-review`, and `/brainstorm` require the respective CLI tools to be installed and authenticated.
+>
+> Looking for **continuous background review** (not a slash command)? See [`codex-pair`](/plugin/hooks#posttooluse-hook-codex-pair-opt-in-continuous-review) — a PostToolUse hook that runs Codex against every file edit when a project has opted in via a marker file. It's the recall-first complement to `/codex-review`.
 
 ### Agents
 
