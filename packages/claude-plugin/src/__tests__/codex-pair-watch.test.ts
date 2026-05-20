@@ -2602,4 +2602,166 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(sessionScript).toMatch(/clearStaleBrokerState/);
     expect(sessionScript).toMatch(/handleSessionEnd/);
   });
+
+  it("ADR-093 transport hotfix: connectWebSocket performs a real RFC 6455 upgrade end-to-end", async () => {
+    const { createServer } = await import("node:net");
+    const { createHash } = await import("node:crypto");
+    const { connectWebSocket } = await import("../../scripts/lib/broker-transport.mjs");
+    const server: import("node:net").Server = createServer((sock) => {
+      let buf = Buffer.alloc(0);
+      let upgraded = false;
+      sock.on("data", (chunk) => {
+        // Always append; the upgrade-vs-frame state machine routes from buf.
+        // Previous test had an order-dependent bug where buf only grew during
+        // the upgrade phase, so a frame arriving in a separate TCP packet
+        // would never be seen by the frame-processing branch.
+        buf = Buffer.concat([buf, chunk]);
+        if (!upgraded) {
+          const end = buf.indexOf("\r\n\r\n");
+          if (end === -1) return;
+          const header = buf.slice(0, end).toString("utf-8");
+          const keyMatch = header.match(/Sec-WebSocket-Key:\s*(.+)/i);
+          if (!keyMatch) {
+            sock.destroy();
+            return;
+          }
+          const key = keyMatch[1].trim();
+          const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
+          sock.write(
+            [
+              "HTTP/1.1 101 Switching Protocols",
+              "Upgrade: websocket",
+              "Connection: Upgrade",
+              `Sec-WebSocket-Accept: ${accept}`,
+              "",
+              "",
+            ].join("\r\n"),
+          );
+          upgraded = true;
+          buf = buf.slice(end + 4);
+        }
+        // Drain any complete frames from buf.
+        while (upgraded && buf.length >= 2) {
+          const opcode = buf[0] & 0x0f;
+          if (opcode !== 0x1) break;
+          const lenByte = buf[1] & 0x7f;
+          const masked = (buf[1] & 0x80) !== 0;
+          const headerSize = 2 + (masked ? 4 : 0);
+          if (buf.length < headerSize + lenByte) break;
+          const mask = masked ? buf.slice(2, 6) : null;
+          const start = headerSize;
+          const payload = Buffer.allocUnsafe(lenByte);
+          for (let i = 0; i < lenByte; i++) {
+            payload[i] = mask ? buf[start + i] ^ mask[i % 4] : buf[start + i];
+          }
+          sock.write(Buffer.concat([Buffer.from([0x81, payload.length]), payload]));
+          buf = buf.slice(start + lenByte);
+        }
+      });
+    });
+    await new Promise<void>((resolveFn) => server.listen(0, "127.0.0.1", () => resolveFn()));
+    const addr = server.address();
+    if (!addr || typeof addr === "string") throw new Error("server.address() returned unexpected shape");
+    const port = addr.port;
+    try {
+      const conn = await connectWebSocket(`ws://127.0.0.1:${port}`, { handshakeTimeoutMs: 3000 });
+      const echoed = await new Promise<string>((resolveFn, reject) => {
+        const t = setTimeout(() => reject(new Error("echo timeout")), 2000);
+        conn.on("message", (text: string) => {
+          clearTimeout(t);
+          resolveFn(text);
+        });
+        conn.sendText("hello");
+      });
+      expect(echoed).toBe("hello");
+      conn.close(1000, "test done");
+    } finally {
+      await new Promise<void>((resolveFn) => server.close(() => resolveFn()));
+    }
+  });
+
+  it("ADR-093 transport hotfix: encodeCloseFrame truncates reason ≥ 124 bytes (RFC 6455 §5.5)", async () => {
+    const { __testing__ } = await import("../../scripts/lib/broker-transport.mjs");
+    const longReason = "x".repeat(200);
+    const frame = __testing__.encodeCloseFrame(1000, longReason);
+    const lengthBits = frame[1] & 0x7f;
+    expect(lengthBits).toBeLessThanOrEqual(125);
+    expect(lengthBits).not.toBe(126);
+    expect(lengthBits).not.toBe(127);
+  });
+
+  it("ADR-093 transport hotfix: encodePongFrame truncates payload > 125 bytes (RFC 6455 §5.5)", async () => {
+    const { __testing__ } = await import("../../scripts/lib/broker-transport.mjs");
+    const oversizedPing = Buffer.alloc(200, "z");
+    const frame = __testing__.encodePongFrame(oversizedPing);
+    const lengthBits = frame[1] & 0x7f;
+    expect(lengthBits).toBe(125);
+  });
+
+  it("ADR-093 transport hotfix: fragmented frame triggers fatal error + halts further frame emission", async () => {
+    const { __testing__ } = await import("../../scripts/lib/broker-transport.mjs");
+    const frames: Array<{ opcode: number }> = [];
+    const errors: Error[] = [];
+    const parser = __testing__.createFrameParser(
+      (f: { opcode: number; payload: Buffer }) => frames.push(f),
+      (err: Error) => errors.push(err),
+    );
+    parser(Buffer.from([0x01, 0x02, 0x68, 0x69]));
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/fragmentation not supported/);
+    expect(frames).toHaveLength(0);
+    parser(Buffer.from([0x81, 0x02, 0x68, 0x69]));
+    expect(frames).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+  });
+
+  it("ADR-093 lifecycle hotfix: readPluginVersion returns non-'unknown' semver (regression for ESM require bug)", async () => {
+    const { readPluginVersion } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    const v = readPluginVersion();
+    expect(v).not.toBe("unknown");
+    expect(v).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it("ADR-093 lifecycle hotfix: clearStaleBrokerState refuses to unlink sockets outside markerDir/state", async () => {
+    const { clearStaleBrokerState } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    const victimDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-pair-victim-"));
+    const victimPath = path.join(victimDir, "do-not-delete.txt");
+    fs.writeFileSync(victimPath, "I must survive");
+    try {
+      fs.writeFileSync(
+        path.join(tempDir, ".codex-pair", "state", "broker.json"),
+        JSON.stringify({ pid: 999999, transportUrl: `unix://${victimPath}`, protocolVersion: "v2" }),
+      );
+      expect(clearStaleBrokerState(tempDir)).toBe("stale");
+      expect(fs.existsSync(path.join(tempDir, ".codex-pair", "state", "broker.json"))).toBe(false);
+      expect(fs.existsSync(victimPath)).toBe(true);
+      expect(fs.readFileSync(victimPath, "utf-8")).toBe("I must survive");
+    } finally {
+      fs.rmSync(victimDir, { recursive: true, force: true });
+    }
+  });
+
+  it("ADR-093 lifecycle hotfix: bootstrapBroker descriptor records non-'unknown' pluginVersion", async () => {
+    const { bootstrapBroker } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair"), { recursive: true });
+    const fakeChild = { pid: 12345, kill: () => true, killed: false, exitCode: null };
+    const result = await bootstrapBroker(tempDir, {
+      injectDeps: {
+        // biome-ignore lint/suspicious/noExplicitAny: test mock
+        spawnBroker: () => fakeChild as any,
+        pollSocketReachable: async () => true,
+        initializeBroker: async () => ({
+          // biome-ignore lint/suspicious/noExplicitAny: test mock
+          connection: { close: () => {} } as any,
+          // biome-ignore lint/suspicious/noExplicitAny: test mock
+          rpc: {} as any,
+          initializeResult: {},
+        }),
+        readCodexVersion: () => "codex-cli 0.130.0",
+      },
+    });
+    expect(result?.pluginVersion).not.toBe("unknown");
+    expect(result?.pluginVersion).toMatch(/^\d+\.\d+\.\d+/);
+  });
 });

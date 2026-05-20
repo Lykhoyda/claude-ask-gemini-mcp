@@ -139,41 +139,60 @@ function encodeTextFrame(text) {
   ]);
 }
 
+// Maximum control-frame payload per RFC 6455 §5.5 ("All control frames
+// MUST have a payload length of 125 bytes or less"). The 7-bit length
+// field in byte[1] would otherwise overflow into the extended-length
+// encoding flags (126, 127). Both encoders below truncate to this cap
+// to guarantee on-wire correctness.
+const MAX_CONTROL_FRAME_PAYLOAD = 125;
+
 // Encode a CLOSE frame with optional status code + reason. Client-masked.
+// Reason is truncated as needed to keep total payload ≤ 125 bytes per
+// RFC 6455 §5.5 (multi-review Finding #3 — previously silently corrupted
+// frames if reason was ≥ 124 bytes).
 function encodeCloseFrame(code = 1000, reason = "") {
-  const reasonBuf = Buffer.from(reason, "utf-8");
+  let reasonBuf = Buffer.from(reason, "utf-8");
+  // 2 bytes for the status code + reason. Truncate reason if combined
+  // would exceed the control-frame cap.
+  if (2 + reasonBuf.length > MAX_CONTROL_FRAME_PAYLOAD) {
+    reasonBuf = reasonBuf.slice(0, MAX_CONTROL_FRAME_PAYLOAD - 2);
+  }
   const payload = Buffer.allocUnsafe(2 + reasonBuf.length);
   payload.writeUInt16BE(code, 0);
   reasonBuf.copy(payload, 2);
   const mask = randomBytes(4);
   const masked = Buffer.allocUnsafe(payload.length);
   for (let i = 0; i < payload.length; i++) masked[i] = payload[i] ^ mask[i % 4];
-  return Buffer.concat([
-    Buffer.from([0x80 | OPCODE_CLOSE, 0x80 | payload.length]),
-    mask,
-    masked,
-  ]);
+  return Buffer.concat([Buffer.from([0x80 | OPCODE_CLOSE, 0x80 | payload.length]), mask, masked]);
 }
 
 // Encode a PONG frame echoing the server's PING payload. Client-masked.
+// PING payload is truncated to 125 bytes (RFC 6455 §5.5) — a hostile or
+// buggy server sending a > 125-byte PING would otherwise scramble our
+// outgoing frame.
 function encodePongFrame(payload) {
+  const capped = payload.length > MAX_CONTROL_FRAME_PAYLOAD ? payload.slice(0, MAX_CONTROL_FRAME_PAYLOAD) : payload;
   const mask = randomBytes(4);
-  const masked = Buffer.allocUnsafe(payload.length);
-  for (let i = 0; i < payload.length; i++) masked[i] = payload[i] ^ mask[i % 4];
-  // Control frames have payload < 126 (RFC 6455 §5.5).
-  return Buffer.concat([
-    Buffer.from([0x80 | OPCODE_PONG, 0x80 | payload.length]),
-    mask,
-    masked,
-  ]);
+  const masked = Buffer.allocUnsafe(capped.length);
+  for (let i = 0; i < capped.length; i++) masked[i] = capped[i] ^ mask[i % 4];
+  return Buffer.concat([Buffer.from([0x80 | OPCODE_PONG, 0x80 | capped.length]), mask, masked]);
 }
 
 // Stateful frame parser. Accumulates incoming bytes and emits whole frames
 // via `onFrame({ opcode, payload })`. Caller drains via `feed(chunk)`.
-// Server→client frames are NOT masked, so we ignore the MASK bit on parse.
+// Server→client frames are NOT masked per RFC 6455 §5.3, so we ignore
+// the MASK bit on parse. On fatal protocol violations (fragmentation we
+// don't support, illegal frame shapes) the parser flips into a "corrupted"
+// state — no further frames are emitted, and onError is called once.
+// The caller (connectWebSocket) destroys the socket so pending RPC
+// requests reject via the close handler. This was a multi-review finding
+// — the previous code did `continue` after fragmentation and the buffer
+// state corrupted forever.
 function createFrameParser(onFrame, onError) {
   let buf = Buffer.alloc(0);
+  let corrupted = false;
   return (chunk) => {
+    if (corrupted) return; // already reported fatal — discard further bytes
     buf = Buffer.concat([buf, chunk]);
     while (buf.length >= 2) {
       const first = buf[0];
@@ -200,14 +219,20 @@ function createFrameParser(onFrame, onError) {
       const maskBit = (second & 0x80) !== 0;
       if (maskBit) offset += 4;
       if (buf.length < offset + len) return; // need more
+      if (!fin && opcode !== OPCODE_CONTINUATION) {
+        // Fragmentation is not supported. Marking corrupted so subsequent
+        // bytes are ignored; the connect handler destroys the socket.
+        // codex doesn't fragment JSON-RPC frames in practice, so this
+        // path is defensive against a buggy or hostile server.
+        corrupted = true;
+        buf = Buffer.alloc(0);
+        onError(
+          new Error(`broker-transport: fragmentation not supported (opcode=${opcode}) — connection terminating`),
+        );
+        return;
+      }
       const payload = buf.slice(offset, offset + len);
       buf = buf.slice(offset + len);
-      if (!fin && opcode !== OPCODE_CONTINUATION) {
-        // We don't support fragmentation. Codex doesn't fragment small
-        // JSON-RPC frames. Emit an error and move on.
-        onError(new Error(`broker-transport: fragmentation not supported (opcode=${opcode})`));
-        continue;
-      }
       onFrame({ opcode, payload });
     }
   };
@@ -249,6 +274,23 @@ export async function connectWebSocket(transportUrl, options = {}) {
         reject(err);
       } else {
         for (const cb of listeners.error) cb(err);
+      }
+    });
+
+    // Send the HTTP/1.1 upgrade request once the TCP/UDS connection is
+    // established. This was missing in the original M2 PR 1 implementation
+    // — flagged by the multi-review (both Codex + Gemini caught it). Unit
+    // tests mocked around connectWebSocket so the missing write was
+    // invisible. The fixture-server test added in this hotfix exercises
+    // the real upgrade path so this class of bug can't recur silently.
+    socket.once("connect", () => {
+      try {
+        socket.write(buildUpgradeRequest(host, secKey));
+      } catch (err) {
+        if (!upgraded) {
+          clearTimeout(timer);
+          reject(err);
+        }
       }
     });
 
@@ -301,6 +343,16 @@ export async function connectWebSocket(transportUrl, options = {}) {
         },
         (err) => {
           for (const cb of listeners.error) cb(err);
+          // Parser-level errors signal unrecoverable protocol corruption
+          // (fragmentation, malformed framing). Destroy the socket so
+          // pending RPC requests reject via the close handler. Multi-
+          // review finding #4: previously the parser silently corrupted
+          // its buffer state and kept "running" against garbage.
+          try {
+            socket.destroy();
+          } catch {
+            // best-effort
+          }
         },
       );
 

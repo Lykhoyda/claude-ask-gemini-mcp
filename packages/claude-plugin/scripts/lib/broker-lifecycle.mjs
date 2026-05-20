@@ -17,14 +17,13 @@
 
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, openSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, openSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { connect as netConnect } from "node:net";
 import { platform } from "node:process";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BROKER_PROTOCOL_VERSION, initializeBroker } from "./broker.mjs";
-import { unlinkSync as unlinkSyncFs, statSync as statSyncFs } from "node:fs";
 import { terminateProcessTree, IS_WINDOWS } from "./process.mjs";
 import { stateRoot } from "./state.mjs";
 
@@ -209,10 +208,13 @@ export function readPluginVersion() {
     const here = dirname(fileURLToPath(import.meta.url));
     // scripts/lib/*.mjs → packages/claude-plugin/package.json
     const manifest = join(here, "..", "..", "package.json");
-    // Synchronous read because this is a one-shot startup cost.
-    // biome-ignore lint/style/useNodejsImportProtocol: ESM dynamic
-    const fs = require("node:fs");
-    const text = fs.readFileSync(manifest, "utf-8");
+    // Use the static ESM import — the original M2 PR 2 code used
+    // `require("node:fs")` which is undefined in ESM (.mjs files), so
+    // every call to this function threw ReferenceError silently and
+    // permanently returned "unknown". Multi-review caught it; the
+    // bootstrap-descriptor test now asserts pluginVersion is not
+    // "unknown" so this regression can't sneak in again.
+    const text = readFileSync(manifest, "utf-8");
     cachedPluginVersion = (JSON.parse(text)?.version || "unknown").trim();
   } catch {
     cachedPluginVersion = "unknown";
@@ -304,11 +306,10 @@ export async function bootstrapBroker(markerDir, options = {}) {
 // Read the broker descriptor synchronously. Returns the parsed object
 // or null on any error (missing, malformed, unreadable). Used by
 // teardownBroker AND by the per-edit hook's readBrokerState lookup.
-import { readFileSync as readFileSyncFs } from "node:fs";
 export function readBrokerDescriptorSync(markerDir) {
   const descPath = join(stateRoot(markerDir), "broker.json");
   try {
-    const text = readFileSyncFs(descPath, "utf-8");
+    const text = readFileSync(descPath, "utf-8");
     const parsed = JSON.parse(text);
     if (!parsed || typeof parsed !== "object") return null;
     if (typeof parsed.pid !== "number" || typeof parsed.transportUrl !== "string") return null;
@@ -379,12 +380,15 @@ async function killPidGracefully(pid, graceMs) {
 }
 
 // Unlink the unix socket file alongside descriptor + lock. Only meaningful
-// on POSIX; on Windows the WS transport doesn't leave a file.
-async function unlinkTransportArtifact(transportUrl) {
-  if (!transportUrl || !transportUrl.startsWith("unix://")) return;
-  const sockPath = transportUrl.slice("unix://".length);
+// on POSIX; on Windows the WS transport doesn't leave a file. Caller
+// must supply markerDir so we can validate the socket path is rooted
+// under the marker's state directory (defense against a tampered
+// descriptor.json pointing the unlink at an arbitrary path).
+async function unlinkTransportArtifact(transportUrl, markerDir) {
+  const safePath = extractSafeSocketPath(transportUrl, markerDir);
+  if (safePath === null) return;
   try {
-    await unlink(sockPath);
+    await unlink(safePath);
   } catch {
     // already gone — fine
   }
@@ -402,10 +406,10 @@ export function clearStaleBrokerState(markerDir) {
   const alive = isPidAlive(descriptor.pid);
   const protoOk = descriptor.protocolVersion === BROKER_PROTOCOL_VERSION;
   let socketOk = true;
-  if (typeof descriptor.transportUrl === "string" && descriptor.transportUrl.startsWith("unix://")) {
-    const sockPath = descriptor.transportUrl.slice("unix://".length);
+  const sockPath = extractSafeSocketPath(descriptor.transportUrl, markerDir);
+  if (sockPath !== null) {
     try {
-      statSyncFs(sockPath);
+      statSync(sockPath);
     } catch {
       socketOk = false;
     }
@@ -413,14 +417,36 @@ export function clearStaleBrokerState(markerDir) {
   if (alive && protoOk && socketOk) return "live";
   // Stale — clean up. Best-effort; failures are silent per ADR-077.
   try {
-    unlinkSyncFs(join(stateRoot(markerDir), "broker.json"));
+    unlinkSync(join(stateRoot(markerDir), "broker.json"));
   } catch {}
-  if (typeof descriptor.transportUrl === "string" && descriptor.transportUrl.startsWith("unix://")) {
+  if (sockPath !== null) {
     try {
-      unlinkSyncFs(descriptor.transportUrl.slice("unix://".length));
+      unlinkSync(sockPath);
     } catch {}
   }
   return "stale";
+}
+
+// Path-safety: validate that a unix:// socket path resolves under the
+// markerDir's state root before we agree to stat or unlink it. Per the
+// multi-review (Gemini Finding #4), a hostile or stale broker.json could
+// otherwise direct us to unlink arbitrary paths the user has write
+// permission to. Returns the safe socket path or null if invalid /
+// non-unix / outside-bounds.
+function extractSafeSocketPath(transportUrl, markerDir) {
+  if (typeof transportUrl !== "string" || !transportUrl.startsWith("unix://")) {
+    return null;
+  }
+  const sockPath = transportUrl.slice("unix://".length);
+  if (!sockPath) return null;
+  const resolvedSock = resolvePath(sockPath);
+  const resolvedRoot = resolvePath(stateRoot(markerDir));
+  // Path must be exactly the state root or strictly nested under it.
+  // The boundary check guards against `/foo/bar/state-evil/x` matching
+  // `/foo/bar/state` via a substring prefix.
+  if (resolvedSock === resolvedRoot) return null; // can't unlink the root itself
+  if (resolvedSock.startsWith(`${resolvedRoot}/`)) return resolvedSock;
+  return null;
 }
 
 // SessionEnd orchestrator. Reads the descriptor, signals the broker pid
@@ -449,7 +475,7 @@ export async function teardownBroker(markerDir, options = {}) {
     // best-effort
   }
   try {
-    await unlinkSockFn(descriptor.transportUrl);
+    await unlinkSockFn(descriptor.transportUrl, markerDir);
   } catch {
     // best-effort
   }
