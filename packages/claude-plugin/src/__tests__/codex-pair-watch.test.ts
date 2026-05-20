@@ -2764,4 +2764,74 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(result?.pluginVersion).not.toBe("unknown");
     expect(result?.pluginVersion).toMatch(/^\d+\.\d+\.\d+/);
   });
+
+  // ADR-095 debt-paydown — codex-pair-flagged bugs verified + fixed.
+
+  it("ADR-095 lifecycle: sleep helper does NOT unref its timer (otherwise SessionStart exits mid-bootstrap)", () => {
+    // Structural pin: the previous bug had `setTimeout(...).unref?.()`
+    // which let Node exit while sleep was awaited. The fix removes the
+    // unref. Detect via source-grep so a future refactor can't silently
+    // re-introduce it.
+    const lifecycle = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "broker-lifecycle.mjs"), "utf-8");
+    expect(lifecycle).toMatch(/function sleep\(ms\)/);
+    expect(lifecycle).not.toMatch(/setTimeout\(resolve, ms\)\.unref/);
+  });
+
+  it("ADR-095 lifecycle: spawnBroker attaches child.on('error') listener (ENOENT defense)", () => {
+    const lifecycle = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "broker-lifecycle.mjs"), "utf-8");
+    // The fix attaches a no-op error listener so spawn dispatch failures
+    // (codex not on PATH) don't crash the hook via unhandled-error event.
+    expect(lifecycle).toMatch(/child\.on\("error"/);
+  });
+
+  it("ADR-095 lifecycle: bootstrap budget exhaustion fails fast (no Math.max floors)", () => {
+    const lifecycle = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "broker-lifecycle.mjs"), "utf-8");
+    // Floors like Math.max(100, deadline-now-1000) and Math.max(500, ...)
+    // let bootstrap overshoot wall-clock budget. The fix uses strict
+    // deadline checks that throw "budget exhausted" instead of clamping.
+    expect(lifecycle).not.toMatch(/Math\.max\(100,\s*deadline/);
+    expect(lifecycle).not.toMatch(/Math\.max\(500,\s*deadline/);
+    expect(lifecycle).toMatch(/broker bootstrap budget exhausted before poll/);
+    expect(lifecycle).toMatch(/broker bootstrap budget exhausted before initialize/);
+  });
+
+  it("ADR-095 lifecycle: descriptor uses BROKER_PROTOCOL_VERSION constant (no hardcoded 'v2')", () => {
+    const lifecycle = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "broker-lifecycle.mjs"), "utf-8");
+    expect(lifecycle).toMatch(/protocolVersion:\s*BROKER_PROTOCOL_VERSION/);
+    expect(lifecycle).not.toMatch(/protocolVersion:\s*["']v2["']/);
+  });
+
+  it("ADR-095 lifecycle: bootstrap catch block closes connection (no leak on descriptor-write failure)", () => {
+    const lifecycle = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "broker-lifecycle.mjs"), "utf-8");
+    // The fix hoists `connection` and closes it in the catch block so a
+    // descriptor-write failure (EACCES, disk full) doesn't leak the
+    // bootstrap RPC connection.
+    expect(lifecycle).toMatch(/let connection = null;[\s\S]+?catch[\s\S]+?connection\.close\(1011/);
+  });
+
+  it("ADR-095 lifecycle: clearStaleBrokerState treats unknown-scheme transport URLs as stale", async () => {
+    const { clearStaleBrokerState } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    // Pid alive + matching protocolVersion + JUNK transport URL → should be stale,
+    // not live. The previous bug returned "live" because socketOk defaulted to true
+    // for unrecognized schemes.
+    fs.writeFileSync(
+      path.join(tempDir, ".codex-pair", "state", "broker.json"),
+      JSON.stringify({
+        pid: process.pid, // alive
+        transportUrl: "http://nope-not-a-real-scheme",
+        protocolVersion: "v2",
+      }),
+    );
+    expect(clearStaleBrokerState(tempDir)).toBe("stale");
+  });
+
+  it("ADR-095 transport: socket error handler uses .on (not .once) so post-upgrade errors aren't dropped", () => {
+    const transport = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "broker-transport.mjs"), "utf-8");
+    // `.once("error")` removes the only listener after the first emission.
+    // If a second error fires post-upgrade (e.g., RST after CLOSE), it becomes
+    // unhandled and can crash the process. Fix uses `.on("error")`.
+    expect(transport).toMatch(/socket\.on\("error"/);
+    // The pre-upgrade reject() is idempotent so multiple invocations are safe.
+  });
 });

@@ -268,7 +268,13 @@ export async function connectWebSocket(transportUrl, options = {}) {
 
     const secKey = randomBytes(16).toString("base64");
 
-    socket.once("error", (err) => {
+    // Use `.on` not `.once` — codex-pair flagged that `.once` removes the
+    // only error listener after the first emission. If a second error
+    // fires post-upgrade (e.g., RST after CLOSE, or a TCP-level failure
+    // mid-stream), it becomes unhandled and crashes the process. The
+    // `if (!upgraded)` guard makes the pre-upgrade reject() idempotent
+    // (reject is a no-op after the promise settles).
+    socket.on("error", (err) => {
       if (!upgraded) {
         clearTimeout(timer);
         reject(err);

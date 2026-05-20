@@ -145,8 +145,14 @@ function probeOnce(transportUrl) {
   });
 }
 
+// Sleep helper. Previously unref'd the timer, which codex-pair flagged
+// repeatedly in M2: a unref'd timer lets Node exit before the awaited
+// promise resolves if no other ref holds the event loop open. Result:
+// SessionStart could exit mid-bootstrap, orphaning the partially-spawned
+// codex process. The bootstrap's wall-clock budget is enforced at the
+// deadline-check call sites, NOT by relying on idle-exit semantics.
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms).unref?.());
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Spawn `codex app-server --listen <transport>` detached so it outlives
@@ -159,6 +165,17 @@ export function spawnBroker(markerDir, transportUrl) {
   const child = spawn("codex", ["app-server", "--listen", transportUrl], {
     detached: true,
     stdio: ["ignore", logFd, logFd],
+  });
+  // spawn() emits "error" asynchronously for ENOENT (codex not on PATH)
+  // and similar dispatch failures. Without a listener, Node treats this
+  // as an unhandled error and crashes the hook process — violating
+  // ADR-077's silent-on-error contract. Codex-pair flagged this finding
+  // repeatedly during M2; attaching a no-op listener catches the error
+  // (bootstrapBroker's poll/initialize step will fail subsequently and
+  // route through the silent-fallback path).
+  child.on("error", () => {
+    // best-effort; bootstrap's outer catch handles the resulting
+    // poll/initialize failure
   });
   // detached + unref so SessionStart can exit cleanly without waiting
   // for the broker. The broker stays alive as a session-scoped daemon.
@@ -247,31 +264,46 @@ export async function bootstrapBroker(markerDir, options = {}) {
 
   const deadline = Date.now() + budgetMs;
   let child = null;
+  let connection = null; // hoisted so the catch block can close on descriptor-write failure
   try {
     const transportUrl = chooseTransport(markerDir);
     child = spawnFn(markerDir, transportUrl);
 
-    const pollBudget = Math.max(100, deadline - Date.now() - 1000);
+    // Strict deadline enforcement. Previously used Math.max(100, ...) and
+    // Math.max(500, ...) as floors — codex-pair repeatedly flagged that
+    // these floors let bootstrap continue AFTER the wall-clock budget had
+    // been exhausted (defeating the silent-fallback contract). The deadline
+    // is authoritative; if it's already past, fail fast.
+    const pollBudget = deadline - Date.now() - 1000;
+    if (pollBudget <= 0) throw new Error("broker bootstrap budget exhausted before poll");
     const reachable = await pollFn(transportUrl, pollBudget);
     if (!reachable) throw new Error("broker did not become reachable within budget");
 
-    const remaining = Math.max(500, deadline - Date.now());
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("broker bootstrap budget exhausted before initialize");
     const clientInfo = {
       name: "codex-pair",
       title: `codex-pair plugin v${readPluginVersion()}`,
       version: readPluginVersion(),
     };
-    const { connection, initializeResult } = await initFn(transportUrl, clientInfo, {
+    const initResult = await initFn(transportUrl, clientInfo, {
       handshakeTimeoutMs: remaining,
       initializeTimeoutMs: remaining,
     });
+    connection = initResult.connection;
+    const initializeResult = initResult.initializeResult;
 
     const descriptor = {
       pid: child.pid,
       transportUrl,
       codexVersion: versionFn(),
       codexHome: initializeResult?.codexHome ?? null,
-      protocolVersion: "v2", // matches BROKER_PROTOCOL_VERSION in broker.mjs
+      // Use the constant rather than a hardcoded "v2" — codex-pair flagged
+      // the drift risk: if BROKER_PROTOCOL_VERSION changes in broker.mjs
+      // but this string isn't updated, stale-recovery would always treat
+      // the descriptor as live (matching the literal "v2" string instead
+      // of the new constant).
+      protocolVersion: BROKER_PROTOCOL_VERSION,
       pluginVersion: readPluginVersion(),
       startedAt: new Date().toISOString(),
       logPath: brokerLogPath(markerDir),
@@ -290,6 +322,16 @@ export async function bootstrapBroker(markerDir, options = {}) {
   } catch {
     // ADR-077 silent-on-error. Tear down the child (best-effort) and
     // signal failure to the caller via null return.
+    // Close the bootstrap connection if it was opened — codex-pair
+    // flagged that a descriptor-write failure would leak the connection
+    // because the close-on-success path is BELOW writeBrokerDescriptor
+    // but the catch never closed it. Hoisting + close-in-catch fixes the
+    // leak.
+    if (connection) {
+      try {
+        connection.close(1011, "bootstrap failed");
+      } catch {}
+    }
     if (child) {
       try {
         terminateProcessTree(child, "SIGTERM");
@@ -405,14 +447,36 @@ export function clearStaleBrokerState(markerDir) {
   if (!descriptor) return "absent";
   const alive = isPidAlive(descriptor.pid);
   const protoOk = descriptor.protocolVersion === BROKER_PROTOCOL_VERSION;
-  let socketOk = true;
-  const sockPath = extractSafeSocketPath(descriptor.transportUrl, markerDir);
-  if (sockPath !== null) {
-    try {
-      statSync(sockPath);
-    } catch {
-      socketOk = false;
+  // Transport-scheme dispatch — codex-pair flagged that the original code
+  // treated UNKNOWN schemes (http://, junk, missing) as live because
+  // extractSafeSocketPath returned null which left socketOk = true
+  // (initialized). The correct logic distinguishes:
+  //   - unix:// inside markerDir/state  → check socket file exists
+  //   - unix:// outside markerDir/state → STALE (tampered descriptor)
+  //   - ws://anything                   → assume live; per-edit probe validates
+  //   - unknown / non-string            → STALE (junk descriptor)
+  let socketOk;
+  // Hoist sockPath so the cleanup block can reference it; only the unix
+  // branch sets it to a real path, other branches leave it null.
+  let sockPath = null;
+  if (typeof descriptor.transportUrl !== "string") {
+    socketOk = false;
+  } else if (descriptor.transportUrl.startsWith("unix://")) {
+    sockPath = extractSafeSocketPath(descriptor.transportUrl, markerDir);
+    if (sockPath === null) {
+      socketOk = false; // unix:// outside bounds — descriptor was tampered
+    } else {
+      try {
+        statSync(sockPath);
+        socketOk = true;
+      } catch {
+        socketOk = false;
+      }
     }
+  } else if (descriptor.transportUrl.startsWith("ws://")) {
+    socketOk = true; // assume live; per-edit probeBrokerHealth validates
+  } else {
+    socketOk = false; // unrecognized scheme
   }
   if (alive && protoOk && socketOk) return "live";
   // Stale — clean up. Best-effort; failures are silent per ADR-077.
