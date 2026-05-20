@@ -35,6 +35,11 @@ function takeNextId() {
 export function createRpcClient(connection, options = {}) {
   const { defaultTimeoutMs = 30000, onNotification = () => {}, onProtocolError = () => {} } = options;
   const pending = new Map(); // id -> { resolve, reject, timer }
+  // Subscriber list for waitFor — each entry { method, predicate, resolve, reject, timer }.
+  // M3 needs to attach a notification listener BEFORE dispatching `turn/start`
+  // (race-safe per brainstorm Risk #1: server can emit `turn/completed` between
+  // request-send and listener-install if registered after the send).
+  const notificationSubscribers = new Set();
   let closed = false;
 
   connection.on("message", (text) => {
@@ -69,7 +74,25 @@ export function createRpcClient(connection, options = {}) {
       // Server-pushed notification (or a server-initiated request, which
       // codex-pair refuses since approvalPolicy:"never" — but pass it up
       // either way and let the caller decide).
-      onNotification({ method: env.method, params: env.params, id: env.id });
+      const notification = { method: env.method, params: env.params, id: env.id };
+      // Dispatch to waitFor subscribers first — they capture by method+predicate.
+      // Iterate a snapshot since resolved subscribers self-remove during dispatch.
+      for (const sub of [...notificationSubscribers]) {
+        if (sub.method === env.method) {
+          try {
+            if (!sub.predicate || sub.predicate(notification)) {
+              notificationSubscribers.delete(sub);
+              clearTimeout(sub.timer);
+              sub.resolve(notification);
+            }
+          } catch (err) {
+            notificationSubscribers.delete(sub);
+            clearTimeout(sub.timer);
+            sub.reject(err);
+          }
+        }
+      }
+      onNotification(notification);
       return;
     }
     onProtocolError(new Error(`broker-rpc: envelope has neither id nor method: ${text.slice(0, 120)}`));
@@ -82,6 +105,12 @@ export function createRpcClient(connection, options = {}) {
       entry.reject(new Error("broker-rpc: connection closed before response"));
       pending.delete(id);
     }
+    // Also reject any notification waiters — they'll never fire post-close.
+    for (const sub of notificationSubscribers) {
+      clearTimeout(sub.timer);
+      sub.reject(new Error("broker-rpc: connection closed before notification"));
+    }
+    notificationSubscribers.clear();
   });
 
   connection.on("error", (err) => {
@@ -120,6 +149,32 @@ export function createRpcClient(connection, options = {}) {
       // Notifications have no id and expect no response.
       if (closed) throw new Error("broker-rpc: client is closed");
       connection.sendText(JSON.stringify({ jsonrpc: "2.0", method, params }));
+    },
+    // Register a notification listener with a predicate. Returns a Promise
+    // resolving to the matched notification, OR rejecting on timeout / close.
+    // CRITICAL: call this BEFORE the request that triggers the notification
+    // (per brainstorm Risk #1 — server can emit `turn/completed` between
+    // request-send and listener-install if registered after the send).
+    //
+    // Usage in M3 submitReview:
+    //   const waiter = rpc.waitFor("turn/completed", n => n.params?.threadId === ourThreadId, timeoutMs);
+    //   await rpc.request("turn/start", { ... });
+    //   const completion = await waiter;
+    waitFor(method, predicate, timeoutMs) {
+      if (closed) return Promise.reject(new Error("broker-rpc: client is closed"));
+      return new Promise((resolve, reject) => {
+        const sub = { method, predicate, resolve, reject, timer: null };
+        sub.timer = setTimeout(() => {
+          notificationSubscribers.delete(sub);
+          reject(
+            new Error(
+              `broker-rpc: waitFor(${method}) timed out after ${timeoutMs}ms`,
+            ),
+          );
+        }, timeoutMs);
+        sub.timer.unref?.();
+        notificationSubscribers.add(sub);
+      });
     },
     get pendingCount() {
       return pending.size;

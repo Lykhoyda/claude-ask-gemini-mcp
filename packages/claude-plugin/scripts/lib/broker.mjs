@@ -65,36 +65,60 @@ export const JSONRPC_NOTIFICATIONS = Object.freeze({
 // means we get a structured verdict back without prose-parsing (per
 // ADR-083's verdict contract). Centralized here so test fixtures and
 // production code build the same schema.
+// JSON Schema for `turn/start.outputSchema`. Harmonized in M3 to match
+// the `parseConcernsJson` contract in `lib/parser.mjs` so the broker's
+// structured output drops in to the existing per-edit hook flow without
+// translation. Brainstorm-coordinator and codex-pair both flagged the
+// prior mismatch (the original schema used `concerns: { high, med, low }`
+// while the parser expects `findings: [{ severity, ... }]`).
+//
+// Shape matches `parser.mjs::parseConcernsJson`:
+//   { verdict: "clean" } → no concerns
+//   { verdict: "concerns", findings: [{ severity, body, file?, line?, recommendation? }] }
+//
+// Severity enum mirrors `lib/parser.mjs::SEVERITY_TO_BUCKET`:
+//   "high" | "medium" | "low" (parser also accepts "med" but the codex
+//   model emits the canonical "medium" — `med` is a legacy alias).
 export function buildVerdictSchema() {
   return {
     type: "object",
-    required: ["verdict", "concerns"],
+    required: ["verdict"],
     additionalProperties: false,
     properties: {
       verdict: {
         type: "string",
-        enum: ["none", "concerns"],
-        description: "ADR-083 verdict closed set.",
+        enum: ["clean", "concerns"],
+        description: "Closed-set verdict (parser.mjs:parseConcernsJson contract).",
       },
-      concerns: {
-        type: "object",
-        required: ["high", "med", "low"],
-        additionalProperties: false,
-        properties: {
-          high: {
-            type: "array",
-            items: { type: "string" },
-            description: "HIGH-severity concerns. Surfaced via systemMessage.",
-          },
-          med: {
-            type: "array",
-            items: { type: "string" },
-            description: "MED-severity concerns. Surfaced via systemMessage.",
-          },
-          low: {
-            type: "array",
-            items: { type: "string" },
-            description: "LOW-severity concerns. Logged only (ADR-077 threshold).",
+      findings: {
+        type: "array",
+        description: "Required when verdict == 'concerns'. Empty array also accepted.",
+        items: {
+          type: "object",
+          required: ["severity", "body"],
+          additionalProperties: false,
+          properties: {
+            severity: {
+              type: "string",
+              enum: ["high", "medium", "low"],
+              description: "ADR-077 severity ladder. 'medium' (canonical) — 'med' is a legacy alias.",
+            },
+            body: {
+              type: "string",
+              description: "The concern itself — what's wrong + why it matters + how to fix.",
+            },
+            file: {
+              type: "string",
+              description: "File path (optional). When present, prepended to the rendered concern.",
+            },
+            line: {
+              type: ["integer", "string"],
+              description: "Line number (optional). Rendered as ':<line>' suffix on file.",
+            },
+            recommendation: {
+              type: "string",
+              description: "Optional fix suggestion. Appended on a new line after body.",
+            },
           },
         },
       },
@@ -257,8 +281,159 @@ export async function probeBrokerHealth(state) {
 // Returns: { agentMessage: string, tokenUsage: { ... }, durationMs: number }
 // — mirrors the shape spawnCodex currently produces so the hook's main()
 // integration is a one-line substitution.
-export async function submitReview(_args) {
-  throw new Error(
-    "Broker submitReview not implemented yet — see ADR-093 Milestone 3",
+// Tier 3 Milestone 3 implementation. Performs the JSON-RPC dance per
+// ADR-093 + brainstorm-verified protocol facts:
+//   1. `thread/start { ephemeral: true, cwd, baseInstructions, model,
+//      approvalPolicy: "never", sandbox: "read-only" }`
+//      → receives `{ thread: Thread }`. Pin `thread.id`.
+//   2. Register `turn/completed` waiter BEFORE turn/start (race-safe).
+//   3. `turn/start { threadId, input: [{type:"text", text: prompt}],
+//      outputSchema: buildVerdictSchema(), effort: "high",
+//      sandboxPolicy: { type: "readOnly", networkAccess: false } }`
+//      → receives `{ turn: Turn }`. Pin `turn.id`.
+//   4. Await `turn/completed` notification matching our threadId. Extract
+//      the final agentMessage text via `turn.items.findLast(i =>
+//      i.type === "agentMessage")?.text`.
+//   5. On abort: send `turn/interrupt { threadId, turnId }` best-effort.
+//   6. Return STRING (matches spawnCodex's return so the hook flow doesn't
+//      need a translation layer).
+//
+// `args` shape (refined from ADR-090's `(state, prompt, options)`):
+//   { connection, rpc, cwd, baseInstructions, prompt, model, timeoutMs,
+//     abortSignal }
+//
+// Caller owns connection + rpc lifetime; submitReview does NOT close them.
+// Failures map to thrown errors with `.code` matching the existing
+// taggedError verdict set in codex-pair-watch.mjs (timeout, error,
+// parse_failed) so the surrounding hook flow handles them uniformly.
+export async function submitReview(args) {
+  const { rpc, connection, cwd, baseInstructions, prompt, model, timeoutMs = 60_000, abortSignal } = args;
+  if (!rpc) throw new Error("submitReview: rpc client required");
+  if (!connection) throw new Error("submitReview: connection required");
+  if (typeof prompt !== "string" || prompt.length === 0) {
+    throw new Error("submitReview: prompt required");
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => Math.max(0, deadline - Date.now());
+
+  // 1. thread/start (ephemeral — codex auto-discards after the turn).
+  // approvalPolicy: "never" is mandatory for the hook context (no user
+  // available to approve interactive prompts). sandbox: "read-only" denies
+  // file writes from the reviewer.
+  const threadResp = await rpc.request(
+    JSONRPC_METHODS.THREAD_START,
+    {
+      ephemeral: true,
+      cwd,
+      baseInstructions,
+      model,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    },
+    { timeoutMs: remaining() },
   );
+  const threadId = threadResp?.thread?.id;
+  if (typeof threadId !== "string") {
+    throw new Error("submitReview: thread/start returned no thread.id");
+  }
+
+  // 2. Register the turn/completed waiter BEFORE turn/start. Codex can
+  // emit turn/completed between the turn/start dispatch and the listener
+  // registration if we order them the other way around (brainstorm
+  // Risk #1).
+  const completionPromise = rpc.waitFor(
+    JSONRPC_NOTIFICATIONS.TURN_COMPLETED,
+    (n) => n.params?.threadId === threadId,
+    remaining(),
+  );
+
+  // 3. turn/start. outputSchema constrains the agent's final message to
+  // the parser-compatible shape (parser.mjs::parseConcernsJson).
+  const turnResp = await rpc.request(
+    JSONRPC_METHODS.TURN_START,
+    {
+      threadId,
+      input: [{ type: "text", text: prompt }],
+      outputSchema: buildVerdictSchema(),
+      effort: "high",
+      // Belt-and-suspenders: also pin turn-level sandbox + deny network.
+      sandboxPolicy: { type: "readOnly", networkAccess: false },
+    },
+    { timeoutMs: remaining() },
+  );
+  const turnId = turnResp?.turn?.id;
+  if (typeof turnId !== "string") {
+    throw new Error("submitReview: turn/start returned no turn.id");
+  }
+
+  // 4. Wire cancellation. abortSignal abort → turn/interrupt + reject.
+  let abortHandler = null;
+  let interruptSent = false;
+  const abortPromise =
+    abortSignal
+      ? new Promise((_, reject) => {
+          abortHandler = () => {
+            interruptSent = true;
+            // Best-effort interrupt; don't await it on the abort path —
+            // we want to reject the user-facing promise immediately.
+            rpc
+              .request(JSONRPC_METHODS.TURN_INTERRUPT, { threadId, turnId }, { timeoutMs: 2000 })
+              .catch(() => {});
+            const err = new Error("submitReview: aborted");
+            err.code = "aborted";
+            reject(err);
+          };
+          if (abortSignal.aborted) abortHandler();
+          else abortSignal.addEventListener("abort", abortHandler);
+        })
+      : null;
+
+  // 5. Race the completion against the abort.
+  let completion;
+  try {
+    completion = abortPromise
+      ? await Promise.race([completionPromise, abortPromise])
+      : await completionPromise;
+  } catch (err) {
+    // On timeout (waitFor rejects), send best-effort interrupt so we
+    // don't leak a server-side turn.
+    if (!interruptSent && err && err.message && /timed out/.test(err.message)) {
+      rpc
+        .request(JSONRPC_METHODS.TURN_INTERRUPT, { threadId, turnId }, { timeoutMs: 2000 })
+        .catch(() => {});
+      const wrapped = new Error("submitReview: turn timed out");
+      wrapped.code = "timeout";
+      throw wrapped;
+    }
+    throw err;
+  } finally {
+    if (abortHandler && abortSignal) {
+      abortSignal.removeEventListener("abort", abortHandler);
+    }
+  }
+
+  // 6. Extract the final agentMessage from `turn.items`. Brainstorm
+  // confirmed multiple `agentMessage` items can appear (reasoning summaries
+  // vs final answer); `findLast` picks the last/final one.
+  const turn = completion?.params?.turn;
+  if (!turn || !Array.isArray(turn.items)) {
+    const err = new Error("submitReview: turn/completed missing turn.items");
+    err.code = "parse_failed";
+    throw err;
+  }
+  if (turn.status === "failed" || turn.status === "interrupted") {
+    const err = new Error(
+      `submitReview: turn ${turn.status}${turn.error?.message ? ` — ${turn.error.message}` : ""}`,
+    );
+    err.code = "error";
+    throw err;
+  }
+  const finalMessage = turn.items.findLast?.((i) => i?.type === "agentMessage");
+  if (!finalMessage || typeof finalMessage.text !== "string") {
+    const err = new Error("submitReview: turn/completed has no agentMessage item");
+    err.code = "parse_failed";
+    throw err;
+  }
+  return finalMessage.text;
 }
