@@ -297,17 +297,6 @@ claude mcp add --scope user ollama -- npx -y ask-ollama-mcp
 
 </TroubleshootingModal>
 
-<TroubleshootingModal
-  title="Pre-commit hook running on every Bash call, not just git commit"
-  preview="The hook matches Bash but filters by command content"
->
-
-Expected behavior — the hook is a `PreToolUse` matcher on `Bash`, but the script body checks the command for `git commit` and exits 0 immediately if it doesn't match. So it fires on every Bash call but does nothing for non-commit commands. Latency overhead is one shell invocation per Bash call (negligible).
-
-If you want to disable it: edit `packages/claude-plugin/hooks/hooks.json` in your local plugin install (or fork) and remove the `PreToolUse` block.
-
-</TroubleshootingModal>
-
 ## Debug Mode
 
 Enable verbose logging:

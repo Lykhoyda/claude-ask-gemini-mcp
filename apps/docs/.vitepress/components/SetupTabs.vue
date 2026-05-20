@@ -38,7 +38,8 @@
               <p class="config-hint plugin-hint">
                 Or install as a plugin (adds slash commands like
                 <code>/multi-review</code>, <code>/brainstorm</code>,
-                <code>/compare</code>, plus reviewer subagents and a pre-commit hook):
+                <code>/compare</code>, plus reviewer subagents and the opt-in
+                continuous <code>codex-pair</code> review hook):
               </p>
               <div class="language-bash">
                 <button title="Copy Code" class="copy"></button>

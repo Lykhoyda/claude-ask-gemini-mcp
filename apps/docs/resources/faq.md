@@ -8,7 +8,7 @@ description: Frequently asked questions about Ask LLM MCP servers — setup, mul
 
 ### What is Ask LLM?
 
-A set of MCP servers that bridge your AI client (Claude Code, Claude Desktop, Cursor, Warp, Copilot — any of [40+ MCP-compatible clients](https://modelcontextprotocol.io/clients)) with up to three LLM providers running locally on your machine: Google Gemini, OpenAI Codex, and Ollama. Plus a Claude Code plugin layer with slash commands, reviewer subagents, and a pre-commit hook.
+A set of MCP servers that bridge your AI client (Claude Code, Claude Desktop, Cursor, Warp, Copilot — any of [40+ MCP-compatible clients](https://modelcontextprotocol.io/clients)) with up to three LLM providers running locally on your machine: Google Gemini, OpenAI Codex, and Ollama. Plus a Claude Code plugin layer with slash commands, reviewer subagents, and the opt-in continuous `codex-pair` review hook.
 
 ### Why use this instead of the providers directly?
 

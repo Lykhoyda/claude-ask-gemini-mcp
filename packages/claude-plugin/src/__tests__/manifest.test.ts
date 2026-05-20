@@ -76,31 +76,45 @@ describe("marketplace.json", () => {
 describe("hooks.json", () => {
   const hooks = readJson<{ hooks: Record<string, unknown[]> }>("hooks/hooks.json");
 
-  it("declares the PreToolUse hook for git commit", () => {
-    expect(hooks.hooks.PreToolUse).toBeDefined();
-    expect(Array.isArray(hooks.hooks.PreToolUse)).toBe(true);
-    expect(hooks.hooks.PreToolUse).toHaveLength(1);
-  });
-
-  it("PreToolUse hook matcher is Bash", () => {
-    const entry = (hooks.hooks.PreToolUse as Array<{ matcher: string }>)[0];
-    expect(entry.matcher).toBe("Bash");
-  });
-
-  it("hook command references CLAUDE_PLUGIN_ROOT for portability", () => {
-    const entry = (hooks.hooks.PreToolUse as Array<{ hooks: Array<{ command: string }> }>)[0];
-    const command = entry.hooks[0].command;
-    expect(command).toContain("$" + "{CLAUDE_PLUGIN_ROOT}");
-    expect(command).toContain("scripts/pre-commit-review.sh");
-  });
-
   it("Stop hook is NOT present (removed in ADR-048)", () => {
     expect(hooks.hooks.Stop).toBeUndefined();
   });
 
+  it("PreToolUse hook is NOT present (removed in ADR-094)", () => {
+    expect(hooks.hooks.PreToolUse).toBeUndefined();
+  });
+
+  it("declares the PostToolUse codex-pair hook for Edit/Write/MultiEdit", () => {
+    expect(hooks.hooks.PostToolUse).toBeDefined();
+    expect(Array.isArray(hooks.hooks.PostToolUse)).toBe(true);
+    expect(hooks.hooks.PostToolUse).toHaveLength(1);
+    const entry = (hooks.hooks.PostToolUse as Array<{ matcher: string }>)[0];
+    expect(entry.matcher).toBe("Edit|Write|MultiEdit");
+  });
+
+  it("declares SessionStart and SessionEnd hooks for the broker lifecycle (ADR-090)", () => {
+    expect(hooks.hooks.SessionStart).toBeDefined();
+    expect(hooks.hooks.SessionEnd).toBeDefined();
+  });
+
+  it("all hook commands reference CLAUDE_PLUGIN_ROOT for portability", () => {
+    const all = [
+      ...(hooks.hooks.PostToolUse as Array<{ hooks: Array<{ command: string }> }>),
+      ...(hooks.hooks.SessionStart as Array<{ hooks: Array<{ command: string }> }>),
+      ...(hooks.hooks.SessionEnd as Array<{ hooks: Array<{ command: string }> }>),
+    ];
+    for (const entry of all) {
+      expect(entry.hooks[0].command).toContain("$" + "{CLAUDE_PLUGIN_ROOT}");
+    }
+  });
+
   it("referenced script files exist on disk", () => {
-    const scriptPath = path.join(PLUGIN_ROOT, "scripts", "pre-commit-review.sh");
-    expect(fs.existsSync(scriptPath)).toBe(true);
+    expect(fs.existsSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"))).toBe(true);
+    expect(fs.existsSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-session.mjs"))).toBe(true);
+  });
+
+  it("pre-commit-review.sh is NOT present (deleted in ADR-094)", () => {
+    expect(fs.existsSync(path.join(PLUGIN_ROOT, "scripts", "pre-commit-review.sh"))).toBe(false);
   });
 });
 

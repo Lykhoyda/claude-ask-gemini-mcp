@@ -1,35 +1,20 @@
 ---
-description: Automated pre-commit code review via Gemini, plus an opt-in PostToolUse codex-pair reviewer that runs Codex on every file edit when a project marker file is present.
+description: PostToolUse codex-pair reviewer that runs Codex on every file edit when a project marker file is present, plus SessionStart / SessionEnd hooks for the app-server broker lifecycle.
 ---
 
 # Hooks
 
-Hooks are automated actions that trigger on specific Claude Code events. The plugin configures two hooks:
+Hooks are automated actions that trigger on specific Claude Code events. The plugin configures three hooks:
 
-- **`PreToolUse` pre-commit hook** — always on. Reviews staged changes via Gemini before any `git commit`.
-- **`PostToolUse` codex-pair hook** — always loaded, but **self-gates on a project marker file** and stays silent (zero cost, zero codex calls) unless you opt in.
+- **`PostToolUse` codex-pair hook** — always loaded, but **self-gates on a project marker file** and stays silent (zero cost, zero codex calls) unless you opt in. Covered in detail below.
+- **`SessionStart` / `SessionEnd` codex-pair-session hooks** — broker lifecycle scaffolding for the long-lived `codex app-server` (ADR-090 + ADR-093). No-op until `ASK_CODEX_BROKER=1` ships with the Tier 3 implementation.
 
-> The plugin previously shipped a `Stop` hook that reviewed worktree changes when a Claude Code session ended. It was removed in [ADR-048](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md) because the `Stop` event fires per-turn rather than per-session, making it noisy and high-latency, and `git diff HEAD` excluded untracked files which silently dropped coverage on new-file sessions. Use the `/gemini-review` slash command for explicit on-demand reviews instead.
-
-## Pre-Commit Hook
-
-**Trigger:** Before any `git commit` command runs via Bash.
-
-**Action:** Reviews staged changes and warns about critical issues. This is **advisory only** — it does not block the commit.
-
-**What it does:**
-1. Detects when a Bash command contains `git commit` (a `PreToolUse` matcher on the `Bash` tool)
-2. Runs `git diff --cached` to capture what's about to be committed
-3. Filters out sensitive files (secrets, keys, lock files)
-4. Truncates input to 50KB to stay within token limits
-5. Pipes the filtered diff to `gemini -p @tempfile` for a quick review
-6. Outputs warnings to stderr, then exits successfully
-
-> The hook always exits 0. It warns about issues but does not prevent the commit from proceeding. A `trap` ensures the temp file is cleaned up even on signal interruption (ADR-040).
-
-## Provider
-
-The pre-commit hook is hardcoded to use Gemini via the `gemini` CLI directly. To use a different provider, you would need to edit `packages/claude-plugin/scripts/pre-commit-review.sh` and replace the `gemini -p` invocation with `codex exec --full-auto` or `ollama run`.
+> The plugin previously shipped two other hooks that have been removed:
+>
+> - A `Stop` hook (removed in [ADR-048](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) because the `Stop` event fires per-turn rather than per-session, making it noisy and high-latency, and `git diff HEAD` excluded untracked files which silently dropped coverage on new-file sessions.
+> - A `PreToolUse` pre-commit Gemini-review hook (removed in [ADR-094](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)) because per-file codex-pair review delivers higher-recall feedback continuously *during* editing rather than only at commit time, and the on-demand `/gemini-review` skill covers the explicit-review need.
+>
+> Use the `/gemini-review` slash command for explicit on-demand pre-commit reviews instead, or the `/codex-review` skill for a precision-first PR-style review.
 
 ## PostToolUse Hook: `codex-pair` (opt-in continuous review)
 

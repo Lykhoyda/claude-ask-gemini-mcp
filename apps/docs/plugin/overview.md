@@ -1,5 +1,5 @@
 ---
-description: Claude Code plugin for AI-to-AI collaboration. Multi-provider code review, brainstorming agents, pre-commit hooks, and CLI binaries for Gemini, Codex, and Ollama.
+description: Claude Code plugin for AI-to-AI collaboration. Multi-provider code review, brainstorming agents, continuous codex-pair review hook, and CLI binaries for Gemini, Codex, and Ollama.
 ---
 
 # Claude Code Plugin
@@ -69,10 +69,10 @@ This gives you `gemini:ask-gemini` rather than `plugin:ask-llm:gemini:ask-gemini
 
 | Hook | Trigger | Action |
 |------|---------|--------|
-| Pre-commit hook | Before `git commit` | Reviews staged changes via Gemini, warns about critical issues (advisory, does not block) |
 | `codex-pair` PostToolUse | After every Edit/Write/MultiEdit | **Opt-in.** Self-gates on `.codex-pair/context.md` marker file. Zero cost without the marker. With marker: runs Codex review on every edited file, surfaces HIGH/MED concerns to Claude on the next turn. See [Hooks](/plugin/hooks#posttooluse-hook-codex-pair-opt-in-continuous-review) for opt-in steps and cost characteristics |
+| `codex-pair-session` SessionStart / SessionEnd | At Claude session boundary | **Opt-in.** Scaffolding for the long-lived `codex app-server` broker (ADR-090, ADR-093). No-op until `ASK_CODEX_BROKER=1` ships with Tier 3 implementation |
 
-Both hooks shell out directly to their respective provider CLI (`gemini -p` for pre-commit; `codex exec --json` for codex-pair) with zero workspace imports — required so the hooks run from marketplace `git-subdir` installs that don't run `npm install` (see [ADR-078](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)).
+The hook shells out directly to `codex exec --json` with zero workspace imports — required so it runs from marketplace `git-subdir` installs that don't run `npm install` (see [ADR-078](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md)). A previous `PreToolUse` Gemini-review pre-commit hook was removed in [ADR-094](https://github.com/Lykhoyda/ask-llm/blob/main/docs/DECISIONS.md) — use `/gemini-review` or `/codex-review` on demand for explicit pre-commit review instead.
 
 ### CLI Binaries
 
