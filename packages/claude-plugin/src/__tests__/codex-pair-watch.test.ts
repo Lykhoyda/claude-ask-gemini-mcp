@@ -1944,9 +1944,16 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(p).toContain(BROKER_STATE_FILE);
   });
 
-  it("ADR-090: submitReview throws until implementation lands (explicit-failure stub)", async () => {
+  it("ADR-093: submitReview throws until implementation lands (single-args shape per ADR-093)", async () => {
     const { submitReview } = await import("../../scripts/lib/broker.mjs");
-    await expect(submitReview({}, "prompt", {})).rejects.toThrow(/not implemented yet/);
+    await expect(
+      submitReview({
+        state: {},
+        baseInstructions: "ctx",
+        prompt: "review",
+        model: "gpt-5.5",
+      }),
+    ).rejects.toThrow(/not implemented yet/);
   });
 
   it("ADR-090: hooks.json registers SessionStart and SessionEnd dispatchers", () => {
@@ -1955,6 +1962,73 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(hooksJson.hooks.SessionEnd).toBeDefined();
     expect(hooksJson.hooks.SessionStart[0].hooks[0].command).toMatch(/codex-pair-session\.mjs/);
     expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toMatch(/codex-pair-session\.mjs/);
+  });
+
+  // ADR-093: protocol-surface pins. The codex `app-server` JSON-RPC contract
+  // discovered via `codex app-server generate-json-schema` (codex-cli 0.130.0+)
+  // exposes 75 client methods + a bidirectional notification stream. codex-pair
+  // uses a small subset; pinning the names here lets structural tests detect
+  // silent drift if the protocol changes or if a future refactor mistypes a
+  // method name.
+
+  it("ADR-093: broker exports protocol version + JSON-RPC method/notification surface", async () => {
+    const broker = await import("../../scripts/lib/broker.mjs");
+    expect(broker.BROKER_PROTOCOL_VERSION).toBe("v2");
+    expect(typeof broker.JSONRPC_METHODS).toBe("object");
+    expect(typeof broker.JSONRPC_NOTIFICATIONS).toBe("object");
+    expect(typeof broker.buildVerdictSchema).toBe("function");
+  });
+
+  it("ADR-093: JSONRPC_METHODS pins the 5 client-callable methods codex-pair uses", async () => {
+    const { JSONRPC_METHODS } = await import("../../scripts/lib/broker.mjs");
+    expect(JSONRPC_METHODS.INITIALIZE).toBe("initialize");
+    expect(JSONRPC_METHODS.THREAD_START).toBe("thread/start");
+    expect(JSONRPC_METHODS.TURN_START).toBe("turn/start");
+    expect(JSONRPC_METHODS.TURN_INTERRUPT).toBe("turn/interrupt");
+    expect(JSONRPC_METHODS.MODEL_LIST).toBe("model/list");
+    // Object.freeze contract: mutations must throw in strict mode
+    expect(Object.isFrozen(JSONRPC_METHODS)).toBe(true);
+  });
+
+  it("ADR-093: JSONRPC_NOTIFICATIONS pins the server-pushed events we listen for", async () => {
+    const { JSONRPC_NOTIFICATIONS } = await import("../../scripts/lib/broker.mjs");
+    expect(JSONRPC_NOTIFICATIONS.TURN_COMPLETED).toBe("turn/completed");
+    expect(JSONRPC_NOTIFICATIONS.TURN_STARTED).toBe("turn/started");
+    expect(JSONRPC_NOTIFICATIONS.ITEM_AGENT_MESSAGE_DELTA).toBe("item/agentMessage/delta");
+    expect(JSONRPC_NOTIFICATIONS.THREAD_TOKEN_USAGE_UPDATED).toBe("thread/tokenUsage/updated");
+    expect(Object.isFrozen(JSONRPC_NOTIFICATIONS)).toBe(true);
+  });
+
+  it("ADR-093: buildVerdictSchema returns ADR-083-compliant verdict shape", async () => {
+    const { buildVerdictSchema } = await import("../../scripts/lib/broker.mjs");
+    const schema = buildVerdictSchema();
+    expect(schema.type).toBe("object");
+    expect(schema.required).toContain("verdict");
+    expect(schema.required).toContain("concerns");
+    expect(schema.additionalProperties).toBe(false);
+    // verdict closed set per ADR-083
+    expect(schema.properties.verdict.enum).toEqual(["none", "concerns"]);
+    // concerns shape pins HIGH/MED/LOW arrays of strings (ADR-077 grading)
+    const concernsProps = schema.properties.concerns.properties;
+    expect(concernsProps.high.type).toBe("array");
+    expect(concernsProps.high.items.type).toBe("string");
+    expect(concernsProps.med.items.type).toBe("string");
+    expect(concernsProps.low.items.type).toBe("string");
+    expect(schema.properties.concerns.required).toEqual(["high", "med", "low"]);
+  });
+
+  it("ADR-093: broker.mjs documents the protocol-mapping in its module docstring", () => {
+    // Structural pin: future readers must be able to find the protocol
+    // mapping in the source so a refactor can't silently drift away from
+    // the documented contract.
+    const broker = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "lib", "broker.mjs"), "utf-8");
+    expect(broker).toMatch(/ADR-093/);
+    expect(broker).toMatch(/thread\/start/);
+    expect(broker).toMatch(/turn\/start/);
+    expect(broker).toMatch(/turn\/completed/);
+    expect(broker).toMatch(/ephemeral/);
+    expect(broker).toMatch(/outputSchema/);
+    expect(broker).toMatch(/approvalPolicy.*never/);
   });
 
   it("ADR-090: SessionStart hook exits 0 silently when ASK_CODEX_BROKER unset", () => {
