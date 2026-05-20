@@ -11,7 +11,7 @@
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { bootstrapBroker } from "./lib/broker-lifecycle.mjs";
+import { bootstrapBroker, clearStaleBrokerState, teardownBroker } from "./lib/broker-lifecycle.mjs";
 import { CONTEXT_FILENAME, PAIR_ROOT_DIR } from "./lib/state.mjs";
 
 const MARKER_FILE = join(PAIR_ROOT_DIR, CONTEXT_FILENAME);
@@ -55,18 +55,26 @@ async function handleSessionStart() {
   const cwd = process.cwd();
   const markerDir = await findMarkerUp(cwd);
   if (!markerDir) return; // no opt-in marker, nothing to do
-  // bootstrapBroker enforces its own wall-clock budget + exits silently
-  // on every failure path. Either it returns a descriptor (broker is
-  // live) or null (broker was not started). The hook doesn't surface
-  // either outcome — the per-edit hook discovers the broker by reading
-  // the descriptor file at marker resolution time.
+  // Recover from a prior-session crash before launching fresh.
+  // clearStaleBrokerState returns "live" if a still-usable broker
+  // exists — in that case we skip spawning a new one. "absent" or
+  // "stale" both result in a clean slate; bootstrapBroker handles
+  // the spawn + handshake from there.
+  const state = clearStaleBrokerState(markerDir);
+  if (state === "live") return;
   await bootstrapBroker(markerDir);
 }
 
 async function handleSessionEnd() {
-  // TODO(M2 PR 3): read .codex-pair/state/broker.json, send SIGTERM to
-  // pid, wait briefly, terminateProcessTree if still alive, unlink
-  // descriptor + socket + lock.
+  const cwd = process.cwd();
+  const markerDir = await findMarkerUp(cwd);
+  if (!markerDir) return;
+  // teardownBroker reads the descriptor, SIGTERMs the pid with a grace
+  // window, escalates to SIGKILL via terminateProcessTree if needed,
+  // unlinks the descriptor + socket + lock. Returns the descriptor
+  // that was torn down (or null if none existed) — we ignore it; the
+  // hook just needs to exit 0 either way per ADR-077.
+  await teardownBroker(markerDir);
 }
 
 async function main() {

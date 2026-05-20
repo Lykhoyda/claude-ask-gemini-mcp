@@ -134,17 +134,23 @@ export function brokerStatePath(markerDir, stateDir) {
   return join(markerDir, stateDir, BROKER_STATE_FILE);
 }
 
-// Stale-state cleanup helper. SessionStart calls this before launching a
+// Stale-state cleanup helper. SessionStart calls this BEFORE launching a
 // fresh broker; the per-edit hook MAY call it on startup as a belt-and-
-// suspenders defense (but the SessionStart path is the contract).
-// Implementation deferred to Milestone 4.
-export function clearStaleBrokerState(_markerDir) {
-  // Read .codex-pair/state/broker.json; if pid is dead OR socket is gone
-  // OR codex version doesn't match the recorded one OR protocol version
-  // doesn't match BROKER_PROTOCOL_VERSION, unlink the state file so the
-  // next request falls through to a fresh spawn or a fresh broker launch
-  // (per the configured policy).
-}
+// suspenders defense (but the SessionStart path is the contract per
+// ADR-090). Returns "absent" | "live" | "stale".
+//
+// Implementation lives in `broker-lifecycle.mjs` to keep the descriptor-
+// read + cleanup primitives co-located with the rest of the lifecycle
+// orchestration. Re-exported here so consumers (the per-edit hook in M4,
+// codex-pair-session.mjs in this PR) can import a single contract surface.
+//
+// The implementation needs `BROKER_PROTOCOL_VERSION` (this module's
+// constant) — so the lifecycle module imports it from here, and we
+// re-export the function below. This avoids a circular dep because
+// broker-lifecycle.mjs already imports initializeBroker from this file;
+// adding BROKER_PROTOCOL_VERSION to that import doesn't introduce a new
+// cycle.
+export { clearStaleBrokerState } from "./broker-lifecycle.mjs";
 
 // Open a transport connection to a running broker, perform the JSON-RPC
 // `initialize` handshake, and return `{ connection, rpc, initializeResult }`.

@@ -2448,4 +2448,158 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(sessionScript).toMatch(/from\s+["']\.\/lib\/broker-lifecycle\.mjs["']/);
     expect(sessionScript).toMatch(/findMarkerUp/);
   });
+
+  // Milestone 2 PR 3: SessionEnd teardown + clearStaleBrokerState.
+
+  it("ADR-093 lifecycle: readBrokerDescriptorSync returns null on missing/malformed/incomplete files", async () => {
+    const { readBrokerDescriptorSync } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    // Missing
+    expect(readBrokerDescriptorSync(tempDir)).toBeNull();
+    // Malformed
+    fs.writeFileSync(path.join(tempDir, ".codex-pair", "state", "broker.json"), "not json");
+    expect(readBrokerDescriptorSync(tempDir)).toBeNull();
+    // Incomplete (missing required fields)
+    fs.writeFileSync(
+      path.join(tempDir, ".codex-pair", "state", "broker.json"),
+      JSON.stringify({ pid: "not-a-number" }),
+    );
+    expect(readBrokerDescriptorSync(tempDir)).toBeNull();
+    // Valid
+    fs.writeFileSync(
+      path.join(tempDir, ".codex-pair", "state", "broker.json"),
+      JSON.stringify({ pid: 12345, transportUrl: "unix:///tmp/x.sock" }),
+    );
+    const d = readBrokerDescriptorSync(tempDir);
+    expect(d?.pid).toBe(12345);
+  });
+
+  it("ADR-093 lifecycle: isPidAlive returns false for nonexistent pid + true for current process", async () => {
+    const { __testing__ } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    // pid=1 is init on POSIX, definitely alive; pid 999999 is overwhelmingly unlikely
+    expect(__testing__.isPidAlive(process.pid)).toBe(true);
+    expect(__testing__.isPidAlive(999999)).toBe(false);
+    expect(__testing__.isPidAlive(0)).toBe(false);
+    // biome-ignore lint/suspicious/noExplicitAny: testing bad input
+    expect(__testing__.isPidAlive("not a number" as any)).toBe(false);
+  });
+
+  it("ADR-093 lifecycle: clearStaleBrokerState returns 'absent' when no descriptor", async () => {
+    const { clearStaleBrokerState } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    expect(clearStaleBrokerState(tempDir)).toBe("absent");
+  });
+
+  it("ADR-093 lifecycle: clearStaleBrokerState returns 'stale' + unlinks descriptor when pid is dead", async () => {
+    const { clearStaleBrokerState } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    const descPath = path.join(tempDir, ".codex-pair", "state", "broker.json");
+    fs.writeFileSync(
+      descPath,
+      JSON.stringify({
+        pid: 999999, // overwhelmingly unlikely to be a real pid
+        transportUrl: "unix:///tmp/codex-pair-stale-test-nonexistent.sock",
+        protocolVersion: "v2",
+      }),
+    );
+    expect(clearStaleBrokerState(tempDir)).toBe("stale");
+    expect(fs.existsSync(descPath)).toBe(false);
+  });
+
+  it("ADR-093 lifecycle: clearStaleBrokerState returns 'stale' on protocol-version skew", async () => {
+    const { clearStaleBrokerState } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    const descPath = path.join(tempDir, ".codex-pair", "state", "broker.json");
+    // Use current process pid (definitely alive) but wrong protocol version.
+    fs.writeFileSync(
+      descPath,
+      JSON.stringify({
+        pid: process.pid,
+        transportUrl: "unix:///tmp/codex-pair-version-skew-test-doesnt-matter.sock",
+        protocolVersion: "v999",
+      }),
+    );
+    expect(clearStaleBrokerState(tempDir)).toBe("stale");
+    expect(fs.existsSync(descPath)).toBe(false);
+  });
+
+  it("ADR-093 lifecycle: clearStaleBrokerState returns 'live' when pid alive + protocol match + socket exists", async () => {
+    const { clearStaleBrokerState } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    // Create a real socket file so the unix-socket check passes
+    const sockPath = path.join(tempDir, ".codex-pair", "state", "fake.sock");
+    fs.writeFileSync(sockPath, "");
+    const descPath = path.join(tempDir, ".codex-pair", "state", "broker.json");
+    fs.writeFileSync(
+      descPath,
+      JSON.stringify({
+        pid: process.pid, // current test process is alive
+        transportUrl: `unix://${sockPath}`,
+        protocolVersion: "v2", // matches BROKER_PROTOCOL_VERSION
+      }),
+    );
+    expect(clearStaleBrokerState(tempDir)).toBe("live");
+    // Descriptor is preserved
+    expect(fs.existsSync(descPath)).toBe(true);
+  });
+
+  it("ADR-093 lifecycle: clearStaleBrokerState is re-exported from broker.mjs", async () => {
+    const broker = await import("../../scripts/lib/broker.mjs");
+    expect(typeof broker.clearStaleBrokerState).toBe("function");
+  });
+
+  it("ADR-093 lifecycle: teardownBroker returns null + cleans lock when no descriptor exists", async () => {
+    const { teardownBroker } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    const lockPath = path.join(tempDir, ".codex-pair", "state", "broker.lock");
+    fs.mkdirSync(lockPath); // stale lock from crashed bootstrap
+    const result = await teardownBroker(tempDir);
+    expect(result).toBeNull();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("ADR-093 lifecycle: teardownBroker kills pid, unlinks descriptor + socket + lock", async () => {
+    const { teardownBroker } = await import("../../scripts/lib/broker-lifecycle.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    const sockPath = path.join(tempDir, ".codex-pair", "state", "fake.sock");
+    fs.writeFileSync(sockPath, "");
+    const descPath = path.join(tempDir, ".codex-pair", "state", "broker.json");
+    const lockPath = path.join(tempDir, ".codex-pair", "state", "broker.lock");
+    fs.mkdirSync(lockPath);
+    fs.writeFileSync(
+      descPath,
+      JSON.stringify({
+        pid: 12345,
+        transportUrl: `unix://${sockPath}`,
+        protocolVersion: "v2",
+      }),
+    );
+    let killedPid: number | null = null;
+    let unlinkedSock: string | null = null;
+    const result = await teardownBroker(tempDir, {
+      injectDeps: {
+        killPid: async (pid: number) => {
+          killedPid = pid;
+          return true;
+        },
+        unlinkSock: async (url: string) => {
+          unlinkedSock = url;
+          fs.unlinkSync(url.slice("unix://".length));
+        },
+      },
+    });
+    expect(killedPid).toBe(12345);
+    expect(unlinkedSock).toBe(`unix://${sockPath}`);
+    expect(result?.pid).toBe(12345);
+    expect(fs.existsSync(descPath)).toBe(false);
+    expect(fs.existsSync(sockPath)).toBe(false);
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("ADR-093 structural: codex-pair-session.mjs wires SessionEnd + clearStaleBrokerState", () => {
+    const sessionScript = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-session.mjs"), "utf-8");
+    expect(sessionScript).toMatch(/teardownBroker/);
+    expect(sessionScript).toMatch(/clearStaleBrokerState/);
+    expect(sessionScript).toMatch(/handleSessionEnd/);
+  });
 });

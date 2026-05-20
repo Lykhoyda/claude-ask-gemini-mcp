@@ -1,6 +1,8 @@
 // Broker lifecycle: spawn `codex app-server`, poll readiness, handshake,
 // atomic descriptor write. SessionStart calls `bootstrapBroker`; SessionEnd
-// will call the symmetric teardown helpers (Milestone 2 PR 3).
+// calls `teardownBroker`. Stale-broker recovery (`clearStaleBrokerState`)
+// lives in `broker.mjs` so the per-edit hook can also use it as a
+// belt-and-suspenders check.
 //
 // Per ADR-090 + ADR-093 + the brainstorm-coordinator's verified findings:
 // the broker uses RFC 6455 WebSocket framing on BOTH `unix://` and `ws://`
@@ -21,7 +23,8 @@ import { connect as netConnect } from "node:net";
 import { platform } from "node:process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { initializeBroker } from "./broker.mjs";
+import { BROKER_PROTOCOL_VERSION, initializeBroker } from "./broker.mjs";
+import { unlinkSync as unlinkSyncFs, statSync as statSyncFs } from "node:fs";
 import { terminateProcessTree, IS_WINDOWS } from "./process.mjs";
 import { stateRoot } from "./state.mjs";
 
@@ -296,10 +299,172 @@ export async function bootstrapBroker(markerDir, options = {}) {
   }
 }
 
+// ──── SessionEnd teardown (M2 PR 3) ────────────────────────────────────
+
+// Read the broker descriptor synchronously. Returns the parsed object
+// or null on any error (missing, malformed, unreadable). Used by
+// teardownBroker AND by the per-edit hook's readBrokerState lookup.
+import { readFileSync as readFileSyncFs } from "node:fs";
+export function readBrokerDescriptorSync(markerDir) {
+  const descPath = join(stateRoot(markerDir), "broker.json");
+  try {
+    const text = readFileSyncFs(descPath, "utf-8");
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.pid !== "number" || typeof parsed.transportUrl !== "string") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+// Best-effort liveness check on a recorded pid. POSIX uses `process.kill(pid, 0)`
+// which sends a no-op signal — succeeds if the pid exists AND we have
+// permission; fails (throws ESRCH) if the process is gone. Windows lacks
+// this — the brainstorm flagged this as a follow-on; for M2 we treat
+// Windows pids as "always live" so we send SIGTERM unconditionally on
+// the Windows path (terminateProcessTree handles the cross-platform kill).
+export function isPidAlive(pid) {
+  if (typeof pid !== "number" || pid <= 0) return false;
+  if (IS_WINDOWS) return true; // best-effort; rely on terminateProcessTree
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // ESRCH = no such process. EPERM = process exists but we don't own
+    // it (rare for our own-spawned broker but possible across user
+    // switches); treat as "live" since we can't safely conclude dead.
+    if (err && err.code === "EPERM") return true;
+    return false;
+  }
+}
+
+// Send SIGTERM, poll for exit, escalate to terminateProcessTree if the
+// process is still alive after the grace period. Returns boolean (was
+// the pid actually live before we killed it).
+async function killPidGracefully(pid, graceMs) {
+  if (!isPidAlive(pid)) return false;
+  try {
+    if (IS_WINDOWS) {
+      // Windows: no graceful SIGTERM equivalent — go straight to taskkill.
+      // Pass a minimal ChildProcess-shaped object that terminateProcessTree
+      // recognizes.
+      terminateProcessTree({ pid, killed: false, exitCode: null }, "SIGTERM");
+      return true;
+    }
+    // POSIX: SIGTERM the process group (`-pid` requires the spawn was
+    // detached, which bootstrapBroker enforces).
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {
+      // Group gone — try direct pid signal.
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        return false;
+      }
+    }
+    // Poll for exit
+    const deadline = Date.now() + graceMs;
+    while (Date.now() < deadline) {
+      if (!isPidAlive(pid)) return true;
+      await sleep(50);
+    }
+    // Still alive — escalate to SIGKILL via terminateProcessTree
+    terminateProcessTree({ pid, killed: false, exitCode: null }, "SIGKILL");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Unlink the unix socket file alongside descriptor + lock. Only meaningful
+// on POSIX; on Windows the WS transport doesn't leave a file.
+async function unlinkTransportArtifact(transportUrl) {
+  if (!transportUrl || !transportUrl.startsWith("unix://")) return;
+  const sockPath = transportUrl.slice("unix://".length);
+  try {
+    await unlink(sockPath);
+  } catch {
+    // already gone — fine
+  }
+}
+
+// Stale-state cleanup. Reads broker.json; if any "stale" condition holds
+// (pid dead, recorded protocol-version mismatch, unix socket missing),
+// unlinks the descriptor + socket. Returns "absent" | "live" | "stale".
+// SessionStart calls this BEFORE bootstrapBroker to recover from prior
+// crashes; per-edit hook MAY call it as belt-and-suspenders defense.
+// Re-exported from broker.mjs so consumers import one contract surface.
+export function clearStaleBrokerState(markerDir) {
+  const descriptor = readBrokerDescriptorSync(markerDir);
+  if (!descriptor) return "absent";
+  const alive = isPidAlive(descriptor.pid);
+  const protoOk = descriptor.protocolVersion === BROKER_PROTOCOL_VERSION;
+  let socketOk = true;
+  if (typeof descriptor.transportUrl === "string" && descriptor.transportUrl.startsWith("unix://")) {
+    const sockPath = descriptor.transportUrl.slice("unix://".length);
+    try {
+      statSyncFs(sockPath);
+    } catch {
+      socketOk = false;
+    }
+  }
+  if (alive && protoOk && socketOk) return "live";
+  // Stale — clean up. Best-effort; failures are silent per ADR-077.
+  try {
+    unlinkSyncFs(join(stateRoot(markerDir), "broker.json"));
+  } catch {}
+  if (typeof descriptor.transportUrl === "string" && descriptor.transportUrl.startsWith("unix://")) {
+    try {
+      unlinkSyncFs(descriptor.transportUrl.slice("unix://".length));
+    } catch {}
+  }
+  return "stale";
+}
+
+// SessionEnd orchestrator. Reads the descriptor, signals the broker pid
+// to exit gracefully, terminateProcessTree if it doesn't, and cleans up
+// the descriptor + socket + lock. Always exits successfully — ADR-077.
+//
+// Options:
+//   - graceMs (default 1500) — how long to wait for SIGTERM to land
+//     before escalating to SIGKILL.
+//   - injectDeps — { killPid, unlinkSock } for testing.
+export async function teardownBroker(markerDir, options = {}) {
+  const { graceMs = 1500, injectDeps } = options;
+  const killFn = injectDeps?.killPid ?? killPidGracefully;
+  const unlinkSockFn = injectDeps?.unlinkSock ?? unlinkTransportArtifact;
+
+  const descriptor = readBrokerDescriptorSync(markerDir);
+  if (!descriptor) {
+    // No descriptor — nothing to tear down. But still try to clean up
+    // any stray lock from a crashed-mid-bootstrap SessionStart.
+    releaseBrokerLock(brokerLockPath(markerDir));
+    return null;
+  }
+  try {
+    await killFn(descriptor.pid, graceMs);
+  } catch {
+    // best-effort
+  }
+  try {
+    await unlinkSockFn(descriptor.transportUrl);
+  } catch {
+    // best-effort
+  }
+  await unlinkBrokerDescriptor(markerDir);
+  releaseBrokerLock(brokerLockPath(markerDir));
+  return descriptor;
+}
+
 // Test-only exports
 export const __testing__ = {
   BROKER_LOCK_DIR,
   BROKER_LOG_FILE,
   BROKER_SOCKET_PREFIX,
   BOOTSTRAP_BUDGET_MS_DEFAULT,
+  isPidAlive,
+  killPidGracefully,
+  unlinkTransportArtifact,
 };
