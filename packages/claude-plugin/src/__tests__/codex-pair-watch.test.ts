@@ -1944,16 +1944,13 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(p).toContain(BROKER_STATE_FILE);
   });
 
-  it("ADR-093: submitReview throws until implementation lands (single-args shape per ADR-093)", async () => {
+  it("ADR-093 M3: submitReview rejects when required args missing (signature contract)", async () => {
     const { submitReview } = await import("../../scripts/lib/broker.mjs");
-    await expect(
-      submitReview({
-        state: {},
-        baseInstructions: "ctx",
-        prompt: "review",
-        model: "gpt-5.5",
-      }),
-    ).rejects.toThrow(/not implemented yet/);
+    // Empty args → no rpc/connection/prompt — must reject with a clear message.
+    // Implementation landed in M3; the stub-throws test from M2 PR 1 is now
+    // obsolete and replaced by argument-validation pins.
+    // biome-ignore lint/suspicious/noExplicitAny: explicit empty-args test
+    await expect(submitReview({} as any)).rejects.toThrow(/rpc client required/);
   });
 
   it("ADR-090: hooks.json registers SessionStart and SessionEnd dispatchers", () => {
@@ -1999,23 +1996,10 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(Object.isFrozen(JSONRPC_NOTIFICATIONS)).toBe(true);
   });
 
-  it("ADR-093: buildVerdictSchema returns ADR-083-compliant verdict shape", async () => {
-    const { buildVerdictSchema } = await import("../../scripts/lib/broker.mjs");
-    const schema = buildVerdictSchema();
-    expect(schema.type).toBe("object");
-    expect(schema.required).toContain("verdict");
-    expect(schema.required).toContain("concerns");
-    expect(schema.additionalProperties).toBe(false);
-    // verdict closed set per ADR-083
-    expect(schema.properties.verdict.enum).toEqual(["none", "concerns"]);
-    // concerns shape pins HIGH/MED/LOW arrays of strings (ADR-077 grading)
-    const concernsProps = schema.properties.concerns.properties;
-    expect(concernsProps.high.type).toBe("array");
-    expect(concernsProps.high.items.type).toBe("string");
-    expect(concernsProps.med.items.type).toBe("string");
-    expect(concernsProps.low.items.type).toBe("string");
-    expect(schema.properties.concerns.required).toEqual(["high", "med", "low"]);
-  });
+  // The original "concerns: { high, med, low }" schema-shape test from M2
+  // PR 1 was REPLACED in M3 by the parser-harmonized shape. See the M3
+  // schema test below ("ADR-093 M3 schema: buildVerdictSchema matches
+  // parser.mjs::parseConcernsJson contract") for the current contract.
 
   it("ADR-093: broker.mjs documents the protocol-mapping in its module docstring", () => {
     // Structural pin: future readers must be able to find the protocol
@@ -2833,5 +2817,314 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     // unhandled and can crash the process. Fix uses `.on("error")`.
     expect(transport).toMatch(/socket\.on\("error"/);
     // The pre-upgrade reject() is idempotent so multiple invocations are safe.
+  });
+  // Milestone 3: submitReview body + rpc.waitFor + harmonized output schema.
+
+  it("ADR-093 M3 schema: buildVerdictSchema matches parser.mjs::parseConcernsJson contract", async () => {
+    const { buildVerdictSchema } = await import("../../scripts/lib/broker.mjs");
+    const schema = buildVerdictSchema();
+    expect(schema.required).toEqual(["verdict"]);
+    expect(schema.properties.verdict.enum).toEqual(["clean", "concerns"]);
+    expect(schema.properties.findings.type).toBe("array");
+    expect(schema.properties.findings.items.required).toEqual(["severity", "body"]);
+    expect(schema.properties.findings.items.properties.severity.enum).toEqual(["high", "medium", "low"]);
+  });
+
+  it("ADR-093 M3 rpc: waitFor resolves when matching notification arrives", async () => {
+    const { createRpcClient, __testing__ } = await import("../../scripts/lib/broker-rpc.mjs");
+    __testing__.resetIdCounter();
+    const listeners: Record<string, Array<(arg?: unknown) => void>> = { message: [], close: [], error: [] };
+    const mock = {
+      sendText: () => {},
+      close: () => {},
+      on: (event: string, cb: (arg?: unknown) => void) => listeners[event]?.push(cb),
+      get destroyed() {
+        return false;
+      },
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock connection shape
+    const rpc = createRpcClient(mock as any, { defaultTimeoutMs: 1000 });
+    const waiter = rpc.waitFor("turn/completed", (n) => (n.params as { threadId?: string })?.threadId === "T1", 1000);
+    for (const cb of listeners.message)
+      cb(JSON.stringify({ method: "turn/completed", params: { threadId: "T1", turn: { id: "U1", items: [] } } }));
+    const result = await waiter;
+    expect((result.params as { threadId?: string }).threadId).toBe("T1");
+  });
+
+  it("ADR-093 M3 rpc: waitFor rejects on timeout", async () => {
+    const { createRpcClient, __testing__ } = await import("../../scripts/lib/broker-rpc.mjs");
+    __testing__.resetIdCounter();
+    const listeners: Record<string, Array<(arg?: unknown) => void>> = { message: [], close: [], error: [] };
+    const mock = {
+      sendText: () => {},
+      close: () => {},
+      on: (event: string, cb: (arg?: unknown) => void) => listeners[event]?.push(cb),
+      get destroyed() {
+        return false;
+      },
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock connection shape
+    const rpc = createRpcClient(mock as any, { defaultTimeoutMs: 5000 });
+    await expect(rpc.waitFor("turn/completed", null, 50)).rejects.toThrow(/waitFor.*timed out/);
+  });
+
+  it("ADR-093 M3 submitReview: happy path returns final agentMessage text", async () => {
+    const { submitReview } = await import("../../scripts/lib/broker.mjs");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockRpc: any = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "T1" } };
+        if (method === "turn/start") return { turn: { id: "U1" } };
+        throw new Error("unexpected method");
+      },
+      waitFor: async () => ({
+        method: "turn/completed",
+        params: {
+          threadId: "T1",
+          turn: {
+            id: "U1",
+            status: "completed",
+            items: [
+              { type: "reasoning", text: "x" },
+              { type: "agentMessage", text: '{"verdict":"clean"}' },
+            ],
+          },
+        },
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockConn: any = { close: () => {}, on: () => {}, destroyed: false };
+    const result = await submitReview({
+      rpc: mockRpc,
+      connection: mockConn,
+      cwd: "/tmp",
+      baseInstructions: "ctx",
+      prompt: "x",
+      model: "gpt-5.5",
+      timeoutMs: 5000,
+    });
+    expect(result).toBe('{"verdict":"clean"}');
+  });
+
+  it("ADR-093 M3 submitReview: throws code=timeout + sends turn/interrupt on waitFor timeout", async () => {
+    const { submitReview } = await import("../../scripts/lib/broker.mjs");
+    const interruptCalls: Array<{ method: string; params: unknown }> = [];
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockRpc: any = {
+      request: async (method: string, params: unknown) => {
+        if (method === "thread/start") return { thread: { id: "T1" } };
+        if (method === "turn/start") return { turn: { id: "U1" } };
+        if (method === "turn/interrupt") {
+          interruptCalls.push({ method, params });
+          return {};
+        }
+        return {};
+      },
+      waitFor: async () => {
+        // Multi-review M3 hotfix: timeout is detected via structured
+        // err.timeout marker, not regex on message. Mock fakes the
+        // marker that the real waitFor attaches.
+        const e = new Error("broker-rpc: waitFor(turn/completed) timed out after 50ms");
+        // biome-ignore lint/suspicious/noExplicitAny: structured marker
+        (e as any).timeout = true;
+        throw e;
+      },
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockConn: any = { close: () => {}, on: () => {}, destroyed: false };
+    let caught: Error | null = null;
+    try {
+      await submitReview({
+        rpc: mockRpc,
+        connection: mockConn,
+        cwd: "/tmp",
+        baseInstructions: "ctx",
+        prompt: "x",
+        model: "gpt-5.5",
+        timeoutMs: 100,
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    expect((caught as any)?.verdict).toBe("timeout");
+    expect(interruptCalls).toHaveLength(1);
+    expect((interruptCalls[0].params as { threadId: string; turnId: string }).threadId).toBe("T1");
+    expect((interruptCalls[0].params as { threadId: string; turnId: string }).turnId).toBe("U1");
+  });
+
+  it("ADR-093 M3 submitReview: throws code=error when turn.status is failed", async () => {
+    const { submitReview } = await import("../../scripts/lib/broker.mjs");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockRpc: any = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "T1" } };
+        if (method === "turn/start") return { turn: { id: "U1" } };
+        return {};
+      },
+      waitFor: async () => ({
+        method: "turn/completed",
+        params: {
+          threadId: "T1",
+          turn: { id: "U1", status: "failed", error: { message: "quota exhausted" }, items: [] },
+        },
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockConn: any = { close: () => {}, on: () => {}, destroyed: false };
+    let caught: Error | null = null;
+    try {
+      await submitReview({
+        rpc: mockRpc,
+        connection: mockConn,
+        cwd: "/tmp",
+        baseInstructions: "ctx",
+        prompt: "x",
+        model: "gpt-5.5",
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    expect((caught as any)?.verdict).toBe("error");
+    expect(caught?.message).toMatch(/quota/);
+  });
+
+  it("ADR-093 M3 submitReview: thread/start params include ephemeral + approvalPolicy:'never' + sandbox:'read-only'", async () => {
+    const { submitReview } = await import("../../scripts/lib/broker.mjs");
+    let threadStartParams: unknown;
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockRpc: any = {
+      request: async (method: string, params: unknown) => {
+        if (method === "thread/start") {
+          threadStartParams = params;
+          return { thread: { id: "T1" } };
+        }
+        if (method === "turn/start") return { turn: { id: "U1" } };
+        return {};
+      },
+      waitFor: async () => ({
+        method: "turn/completed",
+        params: {
+          threadId: "T1",
+          turn: { id: "U1", status: "completed", items: [{ type: "agentMessage", text: '{"verdict":"clean"}' }] },
+        },
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockConn: any = { close: () => {}, on: () => {}, destroyed: false };
+    await submitReview({
+      rpc: mockRpc,
+      connection: mockConn,
+      cwd: "/proj",
+      baseInstructions: "be strict",
+      prompt: "x",
+      model: "gpt-5.5",
+    });
+    const p = threadStartParams as Record<string, unknown>;
+    expect(p.ephemeral).toBe(true);
+    expect(p.cwd).toBe("/proj");
+    expect(p.baseInstructions).toBe("be strict");
+    expect(p.approvalPolicy).toBe("never");
+    expect(p.sandbox).toBe("read-only");
+  });
+
+  // Multi-review M3 HOTFIX regression tests.
+
+  it("M3 hotfix: submitReview errors set err.verdict (hook reads .verdict, not .code)", async () => {
+    const { submitReview } = await import("../../scripts/lib/broker.mjs");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockRpc: any = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "T1" } };
+        if (method === "turn/start") return { turn: { id: "U1" } };
+        return {};
+      },
+      waitFor: async () => ({
+        method: "turn/completed",
+        params: { threadId: "T1", turn: { id: "U1", status: "completed", items: [] } },
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockConn: any = { close: () => {}, on: () => {}, destroyed: false };
+    let caught: Error | null = null;
+    try {
+      await submitReview({
+        rpc: mockRpc,
+        connection: mockConn,
+        cwd: "/tmp",
+        baseInstructions: "ctx",
+        prompt: "x",
+        model: "gpt-5.5",
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.verdict).toBe("parse_failed");
+    // The legacy `code` field is NOT set (hook reads .verdict only)
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.code).toBeUndefined();
+  });
+
+  it("M3 hotfix: buildVerdictSchema uses line_start (matches parser.mjs::formatFindingBody)", async () => {
+    const { buildVerdictSchema } = await import("../../scripts/lib/broker.mjs");
+    const schema = buildVerdictSchema();
+    const findingProps = schema.properties.findings.items.properties;
+    expect(findingProps.line_start).toBeDefined();
+    expect(findingProps.line_start.type).toBe("integer");
+    expect(findingProps.line).toBeUndefined();
+  });
+
+  it("M3 hotfix: buildVerdictSchema includes optional title (parser renders it)", async () => {
+    const { buildVerdictSchema } = await import("../../scripts/lib/broker.mjs");
+    const schema = buildVerdictSchema();
+    const findingProps = schema.properties.findings.items.properties;
+    expect(findingProps.title).toBeDefined();
+    expect(findingProps.title.type).toBe("string");
+  });
+
+  it("M3 hotfix: rpc.waitFor timeout attaches err.timeout = true (structured marker)", async () => {
+    const { createRpcClient, __testing__ } = await import("../../scripts/lib/broker-rpc.mjs");
+    __testing__.resetIdCounter();
+    const listeners: Record<string, Array<(arg?: unknown) => void>> = { message: [], close: [], error: [] };
+    const mock = {
+      sendText: () => {},
+      close: () => {},
+      on: (event: string, cb: (arg?: unknown) => void) => listeners[event]?.push(cb),
+      get destroyed() {
+        return false;
+      },
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock
+    const rpc = createRpcClient(mock as any, { defaultTimeoutMs: 5000 });
+    let caught: Error | null = null;
+    try {
+      await rpc.waitFor("turn/completed", null, 50);
+    } catch (err) {
+      caught = err as Error;
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.timeout).toBe(true);
+  });
+
+  it("M3 hotfix: rpc connection.error rejects pending notification subscribers", async () => {
+    const { createRpcClient } = await import("../../scripts/lib/broker-rpc.mjs");
+    const listeners: Record<string, Array<(arg?: unknown) => void>> = { message: [], close: [], error: [] };
+    const mock = {
+      sendText: () => {},
+      close: () => {},
+      on: (event: string, cb: (arg?: unknown) => void) => listeners[event]?.push(cb),
+      get destroyed() {
+        return false;
+      },
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: mock
+    const rpc = createRpcClient(mock as any, { defaultTimeoutMs: 5000 });
+    const p = rpc.waitFor("turn/completed", null, 10000);
+    // Simulate transport error WITHOUT a subsequent close
+    const transportErr = new Error("ECONNRESET");
+    for (const cb of listeners.error) cb(transportErr);
+    await expect(p).rejects.toThrow(/ECONNRESET/);
   });
 });
