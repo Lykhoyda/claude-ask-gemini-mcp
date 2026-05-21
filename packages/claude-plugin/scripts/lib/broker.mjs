@@ -140,8 +140,14 @@ export function buildVerdictSchema() {
 // The implementation is intentionally stubbed for v0.7.x Milestone 1.
 // Returning null here causes every hook invocation to fall through to the
 // existing per-edit spawn path — byte-identical behavior to pre-broker.
-export function readBrokerState(_markerDir) {
-  return null;
+// M4: delegate to the lifecycle module's descriptor reader. The function
+// signature is preserved for the stable contract; the body now returns
+// a real descriptor when one exists (vs the M2 stub returning null
+// unconditionally). isBrokerEnabled uses lifecycleReadBrokerDescriptor
+// directly for the same purpose; this exported form is the public API
+// per ADR-090.
+export function readBrokerState(markerDir) {
+  return lifecycleReadBrokerDescriptor(markerDir);
 }
 
 // Stable predicate the hook can call without knowing the broker mechanics.
@@ -149,11 +155,25 @@ export function readBrokerState(_markerDir) {
 // returns a non-null descriptor, (c) the broker process is alive AND
 // answered a health probe within BROKER_HEALTH_TIMEOUT_MS. Today (b) is
 // stubbed to null, so this is always false.
+// Tier 3 Milestone 4: implementation flipped from "always false" to a
+// real check. Returns true iff:
+//   1. ASK_CODEX_BROKER=1 in env (master switch — default off)
+//   2. A valid descriptor exists at <markerDir>/.codex-pair/state/broker.json
+//   3. The descriptor's protocolVersion matches BROKER_PROTOCOL_VERSION
+//   4. The recorded pid is still alive (cheap process.kill(pid, 0))
+//
+// Per ADR-077 silent-on-error: any check that fails returns false; caller
+// falls through to the existing per-edit spawn path. clearStaleBrokerState
+// (called by SessionStart per ADR-090) keeps the descriptor honest between
+// sessions; this check is the per-edit-hook's defense for the case where
+// the broker died MID-SESSION.
 export function isBrokerEnabled(markerDir) {
   if (process.env.ASK_CODEX_BROKER !== "1") return false;
-  const state = readBrokerState(markerDir);
+  const state = lifecycleReadBrokerDescriptor(markerDir);
   if (!state) return false;
-  return false; // implementation deferred — see ADR-093 Milestone 3
+  if (state.protocolVersion !== BROKER_PROTOCOL_VERSION) return false;
+  if (!lifecycleIsPidAlive(state.pid)) return false;
+  return true;
 }
 
 // Path resolver for the per-marker-dir broker state file. Used by the
@@ -179,6 +199,14 @@ export function brokerStatePath(markerDir, stateDir) {
 // adding BROKER_PROTOCOL_VERSION to that import doesn't introduce a new
 // cycle.
 export { clearStaleBrokerState } from "./broker-lifecycle.mjs";
+
+// M4: import the descriptor reader + pid-liveness helper into this module
+// for isBrokerEnabled's per-edit-hook gating check. The one-way dep from
+// broker.mjs → broker-lifecycle.mjs is fine: broker-lifecycle imports
+// BROKER_PROTOCOL_VERSION + initializeBroker from this file, but only
+// uses them inside function bodies (called after module init finishes),
+// so the static-evaluation order is acyclic at the value-of-import level.
+import { isPidAlive as lifecycleIsPidAlive, readBrokerDescriptorSync as lifecycleReadBrokerDescriptor } from "./broker-lifecycle.mjs";
 
 // Open a transport connection to a running broker, perform the JSON-RPC
 // `initialize` handshake, and return `{ connection, rpc, initializeResult }`.
@@ -339,7 +367,13 @@ export async function submitReview(args) {
   );
   const threadId = threadResp?.thread?.id;
   if (typeof threadId !== "string") {
-    throw new Error("submitReview: thread/start returned no thread.id");
+    // M4 brokerFailure discriminator: thread_start failures indicate the
+    // broker is broken at the protocol layer. Hook falls back to spawnCodex.
+    const err = new Error("submitReview: thread/start returned no thread.id");
+    err.verdict = "error";
+    err.brokerFailure = true;
+    err.brokerPhase = "thread_start";
+    throw err;
   }
 
   // 2. Register the turn/completed waiter BEFORE turn/start. Codex can
@@ -368,7 +402,13 @@ export async function submitReview(args) {
   );
   const turnId = turnResp?.turn?.id;
   if (typeof turnId !== "string") {
-    throw new Error("submitReview: turn/start returned no turn.id");
+    // M4 brokerFailure discriminator: turn_start failures = broker protocol
+    // is broken. Hook falls back to spawnCodex.
+    const err = new Error("submitReview: turn/start returned no turn.id");
+    err.verdict = "error";
+    err.brokerFailure = true;
+    err.brokerPhase = "turn_start";
+    throw err;
   }
 
   // 4. Wire cancellation. abortSignal abort → turn/interrupt + reject.
@@ -439,8 +479,11 @@ export async function submitReview(args) {
   // abort-after-completion race; biome won't strip it.
   const turn = completion?.params?.turn;
   if (!turn || !Array.isArray(turn.items)) {
+    // M4: protocol-layer failure → brokerFailure → hook falls back.
     const err = new Error("submitReview: turn/completed missing turn.items");
     err.verdict = "parse_failed";
+    err.brokerFailure = true;
+    err.brokerPhase = "protocol";
     throw err;
   }
   if (turn.status === "failed" || turn.status === "interrupted") {
@@ -452,8 +495,13 @@ export async function submitReview(args) {
   }
   const finalMessage = turn.items.findLast?.((i) => i?.type === "agentMessage");
   if (!finalMessage || typeof finalMessage.text !== "string") {
+    // M4: protocol-layer failure (broker spoke turn/completed but with no
+    // agentMessage). Mark brokerFailure so hook falls back to spawnCodex —
+    // this is a broker-broken state, not a real codex result.
     const err = new Error("submitReview: turn/completed has no agentMessage item");
     err.verdict = "parse_failed";
+    err.brokerFailure = true;
+    err.brokerPhase = "protocol";
     throw err;
   }
   return finalMessage.text;
