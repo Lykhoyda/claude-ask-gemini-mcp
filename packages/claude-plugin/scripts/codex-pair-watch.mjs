@@ -54,6 +54,7 @@ import {
   computeCacheKey,
   CONTEXT_FILENAME,
   contextPath,
+  getBlockingFromShard,
   getCachedConcerns,
   hashConcernBody,
   ignorePath,
@@ -839,11 +840,21 @@ async function main() {
   // scope codex-pair to high-stakes paths (src/billing/**, src/auth/**) and
   // avoid paying $0.05/edit on routine refactor code. Applied BEFORE the
   // ignore-list — include narrows; ignore then excludes from the narrowed set.
+  //
+  // ADR-097 multi-review hotfix on ADR-096 (Codex finding #4): if include
+  // has ONLY negation rules (e.g., `!*.test.ts`), the user's intent is
+  // "review everything EXCEPT these patterns" — symmetric with ignore-list
+  // semantics. Without this fix, negation-only include silently skipped
+  // every file (no positive rule = no match for anything = always skip).
+  // The fix: strip the `negate` flag from those rules and append them to
+  // the ignore-list, then proceed with no inclusion gate.
   const includeRules = readIncludeFile(markerDir);
-  if (includeRules.length > 0) {
+  const positiveInclude = includeRules.filter((r) => !r.negate);
+  const includeNegationsAsIgnore = [];
+  if (positiveInclude.length > 0) {
+    // Standard inclusion gate with full rule set (positive + negation)
     const includeMatch = matchesIgnoreRule(filePath, markerDir, includeRules);
     if (!includeMatch) {
-      // File doesn't match the inclusion-list → silent skip (same UX as ignore).
       await appendLog(markerDir, {
         timestamp: new Date().toISOString(),
         tool: toolName,
@@ -853,12 +864,27 @@ async function main() {
       });
       process.exit(0);
     }
+  } else if (includeRules.length > 0) {
+    // Negation-only include — transform each `!pattern` into a positive
+    // ignore rule. Log once per fire so users see the semantic mapping.
+    for (const r of includeRules) {
+      includeNegationsAsIgnore.push({ negate: false, pattern: r.pattern, raw: r.raw });
+    }
+    await appendLog(markerDir, {
+      timestamp: new Date().toISOString(),
+      tool: toolName,
+      file: filePath,
+      level: "info",
+      reason:
+        ".codex-pair/include has only negation rules — interpreting as 'review everything except these patterns' (treating as ignore-list entries). Add a positive rule like '**' to use include as a strict allow-list.",
+    });
   }
 
   // .codex-pair/ignore — granular per-project opt-out via gitignore-style
   // globs. Match → silent log skip with the matching pattern, NO
   // systemMessage (preserves silent-gating UX for opted-out files).
-  const ignoreRules = readIgnoreFile(markerDir);
+  const ignoreRulesRaw = readIgnoreFile(markerDir);
+  const ignoreRules = [...ignoreRulesRaw, ...includeNegationsAsIgnore];
   const ignoreMatch = matchesIgnoreRule(filePath, markerDir, ignoreRules);
   if (ignoreMatch) {
     await appendLog(markerDir, {
@@ -980,9 +1006,15 @@ async function main() {
         low: cached.low.map((c) => c.slice(0, 800)),
       },
     });
-    // ADR-096: repetition tracker also runs on cache-hit paths. A cache hit
-    // means the user re-edited the same file and the concerns are unchanged —
-    // exactly the "user keeps ignoring this" signal we want to detect.
+    // ADR-097 (ADR-096 multi-review hotfix): cache-hit path is READ-ONLY
+    // against repetitions state. Mutating on cache hits caused the
+    // "rapid undo/redo false-fire" Gemini flagged — same content hash =
+    // cache hit, so 3 trivial saves of unchanged content would cross
+    // the BLOCKING threshold without the user ever seeing the verdict
+    // a second time. The cache TTL (10 min) already bounds how often
+    // live reviews fire; live reviews remain the only path that
+    // increments. The cache-hit path now reads the current shard and
+    // surfaces the banner ONLY if a prior live review crossed threshold.
     const cachedHashes = [
       ...cached.high.map(hashConcernBody),
       ...cached.med.map(hashConcernBody),
@@ -990,7 +1022,7 @@ async function main() {
     ];
     let cachedRepeatedIgnoredCount = 0;
     try {
-      const blocking = await updateRepetitions(markerDir, filePath, cachedHashes);
+      const blocking = getBlockingFromShard(markerDir, filePath, cachedHashes);
       cachedRepeatedIgnoredCount = blocking.length;
     } catch {
       // best-effort
