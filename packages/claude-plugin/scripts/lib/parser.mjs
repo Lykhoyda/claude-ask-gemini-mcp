@@ -33,6 +33,13 @@ export function formatDuration(durationMs) {
 // levels are expanded into the message body. ADR-077 default keeps LOW in the
 // log only (threshold = "med"). The only opt-up is surfaceThreshold = "low";
 // the count summary line always includes LOW so the user knows LOWs exist.
+//
+// ADR-096 (codex-pair UX improvements): when `repeatedIgnoredCount > 0`,
+// the message is prefixed with a loud BLOCKING-tier banner so the
+// consumer cannot silently ignore findings that have been flagged 3+
+// times in a row (poor-man's STOPPER mode — Claude Code's PostToolUse
+// hook can't actually block the next tool call, but bright formatting
+// makes the message un-scrollable-past in flow).
 export function buildVerdictMessage({
   filePath,
   concerns,
@@ -40,10 +47,9 @@ export function buildVerdictMessage({
   durationMs,
   surfaceThreshold,
   cached,
+  repeatedIgnoredCount = 0,
 }) {
-  const threshold = VALID_THRESHOLDS.has(surfaceThreshold)
-    ? surfaceThreshold
-    : DEFAULT_SURFACE_THRESHOLD;
+  const threshold = VALID_THRESHOLDS.has(surfaceThreshold) ? surfaceThreshold : DEFAULT_SURFACE_THRESHOLD;
   const total = concerns.high.length + concerns.med.length + concerns.low.length;
   const flag = fellBack ? " [fallback model]" : "";
   const cachedTag = cached ? " [cached]" : "";
@@ -60,7 +66,20 @@ export function buildVerdictMessage({
   if (threshold === "low") {
     for (const c of concerns.low) details.push(`[LOW]\n${c}`);
   }
-  return details.length > 0 ? `${header}\n\n${details.join("\n\n")}` : header;
+  const body = details.length > 0 ? `${header}\n\n${details.join("\n\n")}` : header;
+  // ADR-096: loud BLOCKING banner when repeated-ignored findings exist.
+  if (repeatedIgnoredCount > 0) {
+    const banner = [
+      "🛑 ═══════════════════════════════════════════════════════════════",
+      `🛑 REPEATED-IGNORED FINDING — ${repeatedIgnoredCount} concern${repeatedIgnoredCount === 1 ? " has" : "s have"} been flagged 3+ times`,
+      "🛑 without being fixed. This is no longer advisory — please address",
+      "🛑 the concerns below BEFORE continuing edits on this file.",
+      "🛑 ═══════════════════════════════════════════════════════════════",
+      "",
+    ].join("\n");
+    return banner + body;
+  }
+  return body;
 }
 
 // Three-stage JSON extractor: raw parse → strip code fences → walk for the

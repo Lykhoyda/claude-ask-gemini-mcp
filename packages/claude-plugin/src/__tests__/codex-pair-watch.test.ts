@@ -325,13 +325,14 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(script).toMatch(/\.codex-pair\/ignore/);
   });
 
-  it("ignore file parser handles `#` comments and `!` negation", () => {
-    const block = script.match(/function readIgnoreFile[\s\S]*?^}/m);
+  it("ignore/include file parser handles `#` comments and `!` negation (readGlobRulesFile)", () => {
+    // ADR-096: readIgnoreFile + readIncludeFile both delegate to the shared
+    // readGlobRulesFile helper. Test the helper body now since the
+    // ignore-specific function is now a thin wrapper.
+    const block = script.match(/function readGlobRulesFile[\s\S]*?^}/m);
     expect(block).toBeTruthy();
     const body = block?.[0] ?? "";
-    // Comment lines (leading #) are skipped
     expect(body).toMatch(/startsWith\(["']#["']\)/);
-    // Negation parsed into a `negate` flag
     expect(body).toMatch(/startsWith\(["']!["']\)/);
     expect(body).toMatch(/negate/);
   });
@@ -527,17 +528,24 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(fresh).not.toMatch(/\[cached\]/);
   });
 
-  it("main() invokes ignore-check between SKIP_PATTERNS and frontmatter parse, no systemMessage on match", () => {
-    // Pin the call sequence — ignore-check comes after SKIP_PATTERNS but
-    // before the marker-file read/parse.
-    expect(script).toMatch(/SKIP_PATTERNS[\s\S]{0,800}?readIgnoreFile/);
+  it("main() invokes include + ignore checks between SKIP_PATTERNS and frontmatter parse, no systemMessage on either", () => {
+    // ADR-096: include-list check runs BEFORE ignore-list (include narrows;
+    // ignore excludes from narrowed set). Both come after SKIP_PATTERNS
+    // and before frontmatter parse. The 800-char distance budget was
+    // expanded to 2000 because the include block adds ~20 LOC.
+    expect(script).toMatch(/SKIP_PATTERNS[\s\S]{0,2000}?readIncludeFile/);
+    expect(script).toMatch(/readIncludeFile[\s\S]{0,1500}?readIgnoreFile/);
     expect(script).toMatch(/matchesIgnoreRule/);
-    // On match, log skip AND exit WITHOUT emitSystemMessage. Verify the
-    // ignore-match block does NOT include a systemMessage call.
+    // On ignore match, log skip AND exit WITHOUT emitSystemMessage.
     const ignoreBlock = script.match(/if\s*\(\s*ignoreMatch[\s\S]*?process\.exit/);
     expect(ignoreBlock).toBeTruthy();
     expect(ignoreBlock?.[0]).toMatch(/matched \.codex-pair\/ignore/);
     expect(ignoreBlock?.[0]).not.toMatch(/emitSystemMessage/);
+    // Same UX for non-inclusion: silent skip, no systemMessage.
+    const includeBlock = script.match(/if\s*\(\s*includeRules\.length[\s\S]*?process\.exit/);
+    expect(includeBlock).toBeTruthy();
+    expect(includeBlock?.[0]).toMatch(/file not in \.codex-pair\/include scope/);
+    expect(includeBlock?.[0]).not.toMatch(/emitSystemMessage/);
   });
 
   // Phase 1 item #3: expanded skip patterns
@@ -3361,5 +3369,149 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(watch).toMatch(/err\?\.brokerFailure/);
     // Cache integration: broker path must NOT add a discriminator to the cache key
     expect(watch).not.toMatch(/cacheKey.*broker|broker.*cacheKey/);
+  });
+
+  // ADR-096: codex-pair UX improvements — inclusion-list scoping +
+  // repetition detector + loud-formatting for repeated-ignored findings.
+
+  it("ADR-096: state.mjs exports include-list + repetition helpers", async () => {
+    const state = await import("../../scripts/lib/state.mjs");
+    expect(typeof state.includePath).toBe("function");
+    expect(typeof state.repetitionsPath).toBe("function");
+    expect(typeof state.hashConcernBody).toBe("function");
+    expect(typeof state.loadRepetitions).toBe("function");
+    expect(typeof state.saveRepetitions).toBe("function");
+    expect(typeof state.updateRepetitions).toBe("function");
+    expect(state.INCLUDE_FILENAME).toBe("include");
+    expect(state.REPETITIONS_FILENAME).toBe("repetitions.json");
+    expect(state.REPETITION_BLOCKING_THRESHOLD).toBe(3);
+  });
+
+  it("ADR-096: hashConcernBody is deterministic and short (16 hex chars)", async () => {
+    const { hashConcernBody } = await import("../../scripts/lib/state.mjs");
+    const a = hashConcernBody("the same concern");
+    const b = hashConcernBody("the same concern");
+    const c = hashConcernBody("a different concern");
+    expect(a).toBe(b);
+    expect(a).not.toBe(c);
+    expect(a).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("ADR-096: updateRepetitions increments count for repeated concerns + drops fixed ones", async () => {
+    const { hashConcernBody, updateRepetitions, loadRepetitions } = await import("../../scripts/lib/state.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    const file = "/abs/src/billing.ts";
+    const h1 = hashConcernBody("concern about float money");
+    const h2 = hashConcernBody("concern about validation bypass");
+
+    // First review: both concerns flagged
+    await updateRepetitions(tempDir, file, [h1, h2]);
+    let map = loadRepetitions(tempDir);
+    expect(map.size).toBe(2);
+    expect(Array.from(map.values()).every((e) => e.count === 1)).toBe(true);
+
+    // Second review: same concerns — counts increment
+    await updateRepetitions(tempDir, file, [h1, h2]);
+    map = loadRepetitions(tempDir);
+    expect(Array.from(map.values()).every((e) => e.count === 2)).toBe(true);
+
+    // Third review: only h1 flagged (h2 was fixed) — h1 increments, h2 dropped
+    await updateRepetitions(tempDir, file, [h1]);
+    map = loadRepetitions(tempDir);
+    expect(map.size).toBe(1);
+    const remaining = Array.from(map.values())[0];
+    expect(remaining.hash).toBe(h1);
+    expect(remaining.count).toBe(3);
+  });
+
+  it("ADR-096: updateRepetitions returns BLOCKING entries when count reaches threshold (3)", async () => {
+    const { hashConcernBody, updateRepetitions } = await import("../../scripts/lib/state.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    const file = "/abs/src/billing.ts";
+    const h = hashConcernBody("persistent concern");
+
+    expect((await updateRepetitions(tempDir, file, [h])).length).toBe(0); // count=1
+    expect((await updateRepetitions(tempDir, file, [h])).length).toBe(0); // count=2
+    const blocking = await updateRepetitions(tempDir, file, [h]); // count=3
+    expect(blocking).toHaveLength(1);
+    expect(blocking[0].hash).toBe(h);
+    expect(blocking[0].count).toBe(3);
+    expect(blocking[0].file).toBe(file);
+  });
+
+  it("ADR-096: loadRepetitions returns empty Map on missing/malformed/wrong-version files", async () => {
+    const { loadRepetitions } = await import("../../scripts/lib/state.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    // Missing → empty
+    expect(loadRepetitions(tempDir).size).toBe(0);
+    // Malformed JSON → empty
+    fs.writeFileSync(path.join(tempDir, ".codex-pair", "state", "repetitions.json"), "not json");
+    expect(loadRepetitions(tempDir).size).toBe(0);
+    // Wrong version → empty
+    fs.writeFileSync(
+      path.join(tempDir, ".codex-pair", "state", "repetitions.json"),
+      JSON.stringify({ v: 999, entries: [] }),
+    );
+    expect(loadRepetitions(tempDir).size).toBe(0);
+  });
+
+  it("ADR-096: buildVerdictMessage adds loud BLOCKING banner when repeatedIgnoredCount > 0", async () => {
+    const { buildVerdictMessage } = await import("../../scripts/lib/parser.mjs");
+    const msg = buildVerdictMessage({
+      filePath: "/abs/src/billing.ts",
+      concerns: { high: ["one"], med: [], low: [] },
+      fellBack: false,
+      durationMs: 1000,
+      surfaceThreshold: "med",
+      cached: false,
+      repeatedIgnoredCount: 2,
+    });
+    // Loud banner present
+    expect(msg).toContain("REPEATED-IGNORED FINDING");
+    expect(msg).toContain("2 concerns have been flagged 3+ times");
+    expect(msg).toContain("🛑");
+    // Original verdict header still present below banner
+    expect(msg).toContain("codex-pair");
+    expect(msg).toContain("1H / 0M / 0L");
+  });
+
+  it("ADR-096: buildVerdictMessage does NOT add banner when repeatedIgnoredCount is 0 or omitted", async () => {
+    const { buildVerdictMessage } = await import("../../scripts/lib/parser.mjs");
+    const msg1 = buildVerdictMessage({
+      filePath: "/abs/x.ts",
+      concerns: { high: ["one"], med: [], low: [] },
+      fellBack: false,
+      durationMs: 1000,
+      surfaceThreshold: "med",
+      cached: false,
+      repeatedIgnoredCount: 0,
+    });
+    const msg2 = buildVerdictMessage({
+      filePath: "/abs/x.ts",
+      concerns: { high: ["one"], med: [], low: [] },
+      fellBack: false,
+      durationMs: 1000,
+      surfaceThreshold: "med",
+      cached: false,
+      // repeatedIgnoredCount omitted — defaults to 0
+    });
+    expect(msg1).not.toContain("REPEATED-IGNORED");
+    expect(msg2).not.toContain("REPEATED-IGNORED");
+    expect(msg1).not.toContain("🛑");
+  });
+
+  it("ADR-096 structural: codex-pair-watch.mjs imports the new state helpers", () => {
+    const watch = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
+    expect(watch).toMatch(/hashConcernBody/);
+    expect(watch).toMatch(/updateRepetitions/);
+    expect(watch).toMatch(/includePath/);
+    expect(watch).toMatch(/readIncludeFile/);
+    expect(watch).toMatch(/readGlobRulesFile/);
+    // Both buildVerdictMessage call sites pass repeatedIgnoredCount
+    const verdictCalls = watch.match(/buildVerdictMessage\(\{[\s\S]+?\}\)/g) ?? [];
+    expect(verdictCalls.length).toBeGreaterThanOrEqual(2);
+    for (const call of verdictCalls) {
+      expect(call).toMatch(/repeatedIgnoredCount/);
+    }
   });
 });

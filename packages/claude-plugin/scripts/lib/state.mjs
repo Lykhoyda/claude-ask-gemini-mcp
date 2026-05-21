@@ -38,6 +38,22 @@ export const PAUSE_SENTINEL_FILE = "paused";
 export const INFLIGHT_DIR = "inflight";
 export const INFLIGHT_TTL_MIN_MS = 600_000;
 
+// ADR-096: codex-pair UX improvements.
+// `.codex-pair/include` (optional inclusion-list, mirror of `.codex-pair/ignore`):
+//   when present + non-empty, ONLY files matching at least one glob are
+//   reviewed. Lets users scope codex-pair to high-stakes paths (e.g.
+//   src/billing/**) and avoid paying $0.05/edit on routine refactor code.
+//   Applied BEFORE the existing ignore-list — include-list narrows; ignore
+//   excludes from the narrowed set.
+// `.codex-pair/state/repetitions.json` (repetition-detector state):
+//   tracks { file, contentHash } → consecutive-flag count. When a concern
+//   reaches REPETITION_BLOCKING_THRESHOLD without being fixed, the hook
+//   prefixes the systemMessage with a loud BLOCKING marker so the
+//   consumer (Claude or human) can't ignore it again silently.
+export const INCLUDE_FILENAME = "include";
+export const REPETITIONS_FILENAME = "repetitions.json";
+export const REPETITION_BLOCKING_THRESHOLD = 3;
+
 // Path resolvers — single source of truth for every state-file location.
 // The hook never hard-codes these strings; it routes through these helpers.
 export const pairRoot = (markerDir) => join(markerDir, PAIR_ROOT_DIR);
@@ -48,6 +64,9 @@ export const cacheRoot = (markerDir) => join(pairRoot(markerDir), CACHE_DIR);
 export const stateRoot = (markerDir) => join(pairRoot(markerDir), STATE_DIR);
 export const pausePath = (markerDir) => join(stateRoot(markerDir), PAUSE_SENTINEL_FILE);
 export const inflightRoot = (markerDir) => join(stateRoot(markerDir), INFLIGHT_DIR);
+// ADR-096: include-list + repetitions resolvers
+export const includePath = (markerDir) => join(pairRoot(markerDir), INCLUDE_FILENAME);
+export const repetitionsPath = (markerDir) => join(stateRoot(markerDir), REPETITIONS_FILENAME);
 
 // ── Pause sentinel (ADR-085, paths consolidated per ADR-092) ─────────────
 export function isPaused(markerDir) {
@@ -278,3 +297,98 @@ export async function appendLog(markerDir, entry) {
   await rotateLogIfNeeded(target);
 }
 
+
+
+// ADR-096: Repetition detector (codex-pair UX improvement).
+//
+// Stores per-(file, concernHash) consecutive-flag counts so the hook can
+// detect "this same concern has been flagged 3+ times and the consumer
+// keeps ignoring it" and escalate the systemMessage. Mathematically:
+//   - On every concerns-verdict review of a file, hash each concern body
+//   - For each NEW concern (file + hash): increment count
+//   - For each PRIOR concern from state on this file that's NOT in the
+//     new review: it was likely fixed; drop it from state
+//   - Save state, return the list of {file, hash, count} where
+//     count >= REPETITION_BLOCKING_THRESHOLD
+//
+// State file shape (versioned for forward-compat):
+//   { v: 1, entries: [{ file, hash, count, firstSeenAt, lastSeenAt }] }
+
+export function hashConcernBody(body) {
+  return createHash("sha256").update(String(body)).digest("hex").slice(0, 16);
+}
+
+export function loadRepetitions(markerDir) {
+  const p = repetitionsPath(markerDir);
+  try {
+    const raw = readFileSync(p, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || parsed.v !== 1) return new Map();
+    if (!Array.isArray(parsed.entries)) return new Map();
+    const map = new Map();
+    for (const e of parsed.entries) {
+      if (!e || typeof e !== "object") continue;
+      if (typeof e.file !== "string" || typeof e.hash !== "string") continue;
+      if (typeof e.count !== "number" || e.count <= 0) continue;
+      const key = e.file + " " + e.hash;
+      map.set(key, {
+        file: e.file,
+        hash: e.hash,
+        count: e.count,
+        firstSeenAt: e.firstSeenAt ?? new Date().toISOString(),
+        lastSeenAt: e.lastSeenAt ?? new Date().toISOString(),
+      });
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+export async function saveRepetitions(markerDir, map) {
+  const p = repetitionsPath(markerDir);
+  const payload = { v: 1, entries: Array.from(map.values()) };
+  try {
+    await mkdir(dirname(p), { recursive: true });
+    const tmp = p + ".tmp." + process.pid;
+    await writeFile(tmp, JSON.stringify(payload));
+    await rename(tmp, p);
+  } catch {
+    // best-effort — repetitions are advisory; failure must not break hook
+  }
+}
+
+// Update repetition state for a single file given the set of concern hashes
+// from the just-completed review. Returns the array of entries that have
+// crossed REPETITION_BLOCKING_THRESHOLD — the hook uses these to apply
+// loud BLOCKING formatting to the systemMessage.
+export async function updateRepetitions(markerDir, file, newHashes) {
+  const map = loadRepetitions(markerDir);
+  const newSet = new Set(newHashes);
+  const now = new Date().toISOString();
+  const priorOnFile = [];
+  for (const [key, entry] of map.entries()) {
+    if (entry.file === file) priorOnFile.push({ key, entry });
+  }
+  for (const { key, entry } of priorOnFile) {
+    if (newSet.has(entry.hash)) {
+      entry.count += 1;
+      entry.lastSeenAt = now;
+      newSet.delete(entry.hash);
+    } else {
+      map.delete(key);
+    }
+  }
+  for (const hash of newSet) {
+    const key = file + " " + hash;
+    map.set(key, { file, hash, count: 1, firstSeenAt: now, lastSeenAt: now });
+  }
+  await saveRepetitions(markerDir, map);
+  const blocking = [];
+  for (const entry of map.values()) {
+    if (entry.file === file && entry.count >= REPETITION_BLOCKING_THRESHOLD) {
+      blocking.push({ file: entry.file, hash: entry.hash, count: entry.count });
+    }
+  }
+  return blocking;
+}

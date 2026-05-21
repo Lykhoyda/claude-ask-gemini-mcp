@@ -55,13 +55,16 @@ import {
   CONTEXT_FILENAME,
   contextPath,
   getCachedConcerns,
+  hashConcernBody,
   ignorePath,
+  includePath,
   INFLIGHT_TTL_MIN_MS,
   isPaused,
   PAIR_ROOT_DIR,
   releaseInflightLock,
   setCachedConcerns,
   tryAcquireInflightLock,
+  updateRepetitions,
 } from "./lib/state.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -338,10 +341,12 @@ async function buildAdaptiveContext({ filePath, fileContent, markerDir, maxFileB
 // empty array. Comments (`#` lines) and blank lines are filtered out. Each
 // rule carries `{ negate, pattern, raw }`. Per-project, single file — no
 // nested ignore-file traversal in subdirs (the marker is the project anchor).
-function readIgnoreFile(markerDir) {
+// Generic gitignore-style rule parser used for BOTH .codex-pair/ignore
+// (ADR-081 exclusion-list) AND .codex-pair/include (ADR-096 inclusion-list).
+function readGlobRulesFile(absolutePath) {
   let content;
   try {
-    content = readFileSync(ignorePath(markerDir), "utf8");
+    content = readFileSync(absolutePath, "utf8");
   } catch {
     return [];
   }
@@ -355,6 +360,17 @@ function readIgnoreFile(markerDir) {
     rules.push({ negate, pattern, raw: line });
   }
   return rules;
+}
+
+function readIgnoreFile(markerDir) {
+  return readGlobRulesFile(ignorePath(markerDir));
+}
+
+// ADR-096: inclusion-list mirror of ignore-list. When `.codex-pair/include`
+// exists AND has at least one non-comment rule, ONLY files matching at
+// least one rule are reviewed. Empty/missing = no scoping (review everything).
+function readIncludeFile(markerDir) {
+  return readGlobRulesFile(includePath(markerDir));
 }
 
 // Convert a gitignore-style glob into a JS RegExp. Handles `*` (any chars
@@ -818,6 +834,27 @@ async function main() {
   const lower = filePath.toLowerCase();
   if (SKIP_PATTERNS.some((p) => lower.includes(p))) process.exit(0);
 
+  // ADR-096: .codex-pair/include — inclusion-list scoping. When present + non-
+  // empty, ONLY files matching at least one rule are reviewed. Lets users
+  // scope codex-pair to high-stakes paths (src/billing/**, src/auth/**) and
+  // avoid paying $0.05/edit on routine refactor code. Applied BEFORE the
+  // ignore-list — include narrows; ignore then excludes from the narrowed set.
+  const includeRules = readIncludeFile(markerDir);
+  if (includeRules.length > 0) {
+    const includeMatch = matchesIgnoreRule(filePath, markerDir, includeRules);
+    if (!includeMatch) {
+      // File doesn't match the inclusion-list → silent skip (same UX as ignore).
+      await appendLog(markerDir, {
+        timestamp: new Date().toISOString(),
+        tool: toolName,
+        file: filePath,
+        verdict: "skipped",
+        reason: "file not in .codex-pair/include scope",
+      });
+      process.exit(0);
+    }
+  }
+
   // .codex-pair/ignore — granular per-project opt-out via gitignore-style
   // globs. Match → silent log skip with the matching pattern, NO
   // systemMessage (preserves silent-gating UX for opted-out files).
@@ -943,6 +980,21 @@ async function main() {
         low: cached.low.map((c) => c.slice(0, 800)),
       },
     });
+    // ADR-096: repetition tracker also runs on cache-hit paths. A cache hit
+    // means the user re-edited the same file and the concerns are unchanged —
+    // exactly the "user keeps ignoring this" signal we want to detect.
+    const cachedHashes = [
+      ...cached.high.map(hashConcernBody),
+      ...cached.med.map(hashConcernBody),
+      ...cached.low.map(hashConcernBody),
+    ];
+    let cachedRepeatedIgnoredCount = 0;
+    try {
+      const blocking = await updateRepetitions(markerDir, filePath, cachedHashes);
+      cachedRepeatedIgnoredCount = blocking.length;
+    } catch {
+      // best-effort
+    }
     await emitSystemMessage(
       buildVerdictMessage({
         filePath,
@@ -951,6 +1003,7 @@ async function main() {
         durationMs: cachedDurationMs,
         surfaceThreshold: config.surfaceThreshold,
         cached: true,
+        repeatedIgnoredCount: cachedRepeatedIgnoredCount,
       }),
     );
     process.exit(0);
@@ -1044,6 +1097,24 @@ async function main() {
     },
   });
 
+  // ADR-096: repetition tracker. Hash each concern body across all severities;
+  // updateRepetitions increments counts for concerns flagged again on the
+  // same file and drops concerns the user has clearly fixed. When the
+  // count crosses REPETITION_BLOCKING_THRESHOLD, the systemMessage gets a
+  // loud BLOCKING banner so the consumer can't silently keep ignoring it.
+  const repetitionHashes = [
+    ...concerns.high.map(hashConcernBody),
+    ...concerns.med.map(hashConcernBody),
+    ...concerns.low.map(hashConcernBody),
+  ];
+  let repeatedIgnoredCount = 0;
+  try {
+    const blocking = await updateRepetitions(markerDir, filePath, repetitionHashes);
+    repeatedIgnoredCount = blocking.length;
+  } catch {
+    // best-effort — repetitions are advisory; failure must not break the hook
+  }
+
   await emitSystemMessage(
     buildVerdictMessage({
       filePath,
@@ -1051,6 +1122,7 @@ async function main() {
       fellBack,
       durationMs,
       surfaceThreshold: config.surfaceThreshold,
+      repeatedIgnoredCount,
     }),
   );
 
