@@ -51,8 +51,19 @@ export const INFLIGHT_TTL_MIN_MS = 600_000;
 //   prefixes the systemMessage with a loud BLOCKING marker so the
 //   consumer (Claude or human) can't ignore it again silently.
 export const INCLUDE_FILENAME = "include";
-export const REPETITIONS_FILENAME = "repetitions.json";
+// ADR-097 (ADR-096 hotfix): repetitions sharded per-file at
+// `.codex-pair/state/repetitions/<sha256(file)[0:16]>.json` to eliminate
+// the cross-file TOCTOU race that both /multi-review reviewers caught
+// on ADR-096 (Gemini conf 95, Codex conf 88). Each shard's read-modify-
+// write cycle is naturally serialized by ADR-087's per-file inflight
+// lock; cross-file edits no longer share a serialization root.
+export const REPETITIONS_FILENAME = "repetitions.json"; // legacy singleton (v1) — unused; left for reference
+export const REPETITIONS_SHARDS_DIR = "repetitions";
 export const REPETITION_BLOCKING_THRESHOLD = 3;
+export const REPETITIONS_SHARD_SCHEMA_VERSION = 2;
+// 30-day TTL on shard files. Sweep runs probabilistically on update
+// (5% per call) so abandoned files don't accumulate state forever.
+export const REPETITIONS_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 // Path resolvers — single source of truth for every state-file location.
 // The hook never hard-codes these strings; it routes through these helpers.
@@ -66,7 +77,15 @@ export const pausePath = (markerDir) => join(stateRoot(markerDir), PAUSE_SENTINE
 export const inflightRoot = (markerDir) => join(stateRoot(markerDir), INFLIGHT_DIR);
 // ADR-096: include-list + repetitions resolvers
 export const includePath = (markerDir) => join(pairRoot(markerDir), INCLUDE_FILENAME);
+// Legacy v1 singleton path — kept for the one-time cleanup of pre-hotfix
+// shard files. Production code uses repetitionsShardPath() (v2 sharded).
 export const repetitionsPath = (markerDir) => join(stateRoot(markerDir), REPETITIONS_FILENAME);
+// ADR-097: per-file shard layout.
+export const repetitionsShardsRoot = (markerDir) => join(stateRoot(markerDir), REPETITIONS_SHARDS_DIR);
+export function repetitionsShardPath(markerDir, file) {
+  const hash = createHash("sha256").update(String(file)).digest("hex").slice(0, 16);
+  return join(repetitionsShardsRoot(markerDir), hash + ".json");
+}
 
 // ── Pause sentinel (ADR-085, paths consolidated per ADR-092) ─────────────
 export function isPaused(markerDir) {
@@ -299,40 +318,50 @@ export async function appendLog(markerDir, entry) {
 
 
 
-// ADR-096: Repetition detector (codex-pair UX improvement).
+// ADR-096 (sharded per ADR-097 hotfix): Repetition detector.
 //
 // Stores per-(file, concernHash) consecutive-flag counts so the hook can
 // detect "this same concern has been flagged 3+ times and the consumer
-// keeps ignoring it" and escalate the systemMessage. Mathematically:
-//   - On every concerns-verdict review of a file, hash each concern body
-//   - For each NEW concern (file + hash): increment count
-//   - For each PRIOR concern from state on this file that's NOT in the
-//     new review: it was likely fixed; drop it from state
-//   - Save state, return the list of {file, hash, count} where
-//     count >= REPETITION_BLOCKING_THRESHOLD
+// keeps ignoring it" and escalate the systemMessage with a 🛑 banner.
 //
-// State file shape (versioned for forward-compat):
-//   { v: 1, entries: [{ file, hash, count, firstSeenAt, lastSeenAt }] }
+// Storage layout (v2): one shard file per reviewed file, at
+//   `.codex-pair/state/repetitions/<sha256(file)[0:16]>.json`
+// Shard schema: `{ v: 2, file, entries: [{hash, count, firstSeenAt, lastSeenAt}] }`
+//
+// Sharding (ADR-097 multi-review hotfix on ADR-096) eliminates the
+// cross-file TOCTOU race: each shard's read-modify-write is naturally
+// serialized by ADR-087's per-file inflight lock. The previous v1
+// singleton design lost increments under concurrent edits on different
+// files.
+//
+// `loadRepetitionsForFile`: read shard for a single file. Returns
+// Map<hash, entry>. Tolerant of missing/malformed/wrong-version.
+// `saveRepetitionsForFile`: atomic tmp+rename of one shard.
+// `updateRepetitions`: increment-or-drop + save + return blocking
+// entries (count >= REPETITION_BLOCKING_THRESHOLD).
+// `getBlockingFromShard`: read-only — checks whether currently-cached
+// concerns have already crossed threshold without incrementing (used
+// by the cache-hit path to surface the banner without re-counting).
+// `sweepStaleRepetitions`: drop shards older than REPETITIONS_TTL_MS.
 
 export function hashConcernBody(body) {
   return createHash("sha256").update(String(body)).digest("hex").slice(0, 16);
 }
 
-export function loadRepetitions(markerDir) {
-  const p = repetitionsPath(markerDir);
+export function loadRepetitionsForFile(markerDir, file) {
+  const p = repetitionsShardPath(markerDir, file);
   try {
     const raw = readFileSync(p, "utf-8");
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || parsed.v !== 1) return new Map();
+    if (!parsed || typeof parsed !== "object") return new Map();
+    if (parsed.v !== REPETITIONS_SHARD_SCHEMA_VERSION) return new Map();
     if (!Array.isArray(parsed.entries)) return new Map();
     const map = new Map();
     for (const e of parsed.entries) {
       if (!e || typeof e !== "object") continue;
-      if (typeof e.file !== "string" || typeof e.hash !== "string") continue;
+      if (typeof e.hash !== "string") continue;
       if (typeof e.count !== "number" || e.count <= 0) continue;
-      const key = e.file + " " + e.hash;
-      map.set(key, {
-        file: e.file,
+      map.set(e.hash, {
         hash: e.hash,
         count: e.count,
         firstSeenAt: e.firstSeenAt ?? new Date().toISOString(),
@@ -345,9 +374,13 @@ export function loadRepetitions(markerDir) {
   }
 }
 
-export async function saveRepetitions(markerDir, map) {
-  const p = repetitionsPath(markerDir);
-  const payload = { v: 1, entries: Array.from(map.values()) };
+export async function saveRepetitionsForFile(markerDir, file, map) {
+  const p = repetitionsShardPath(markerDir, file);
+  const payload = {
+    v: REPETITIONS_SHARD_SCHEMA_VERSION,
+    file,
+    entries: Array.from(map.values()),
+  };
   try {
     await mkdir(dirname(p), { recursive: true });
     const tmp = p + ".tmp." + process.pid;
@@ -358,37 +391,97 @@ export async function saveRepetitions(markerDir, map) {
   }
 }
 
-// Update repetition state for a single file given the set of concern hashes
-// from the just-completed review. Returns the array of entries that have
-// crossed REPETITION_BLOCKING_THRESHOLD — the hook uses these to apply
-// loud BLOCKING formatting to the systemMessage.
-export async function updateRepetitions(markerDir, file, newHashes) {
-  const map = loadRepetitions(markerDir);
-  const newSet = new Set(newHashes);
-  const now = new Date().toISOString();
-  const priorOnFile = [];
-  for (const [key, entry] of map.entries()) {
-    if (entry.file === file) priorOnFile.push({ key, entry });
-  }
-  for (const { key, entry } of priorOnFile) {
-    if (newSet.has(entry.hash)) {
-      entry.count += 1;
-      entry.lastSeenAt = now;
-      newSet.delete(entry.hash);
-    } else {
-      map.delete(key);
-    }
-  }
-  for (const hash of newSet) {
-    const key = file + " " + hash;
-    map.set(key, { file, hash, count: 1, firstSeenAt: now, lastSeenAt: now });
-  }
-  await saveRepetitions(markerDir, map);
+// Read-only check — used by the cache-hit path. Returns the subset of
+// `newHashes` whose count already meets/exceeds the BLOCKING threshold.
+// Does NOT mutate state, so rapid undo/redo producing cache hits won't
+// increment counts (closes ADR-096 multi-review finding #3 — cache-hit
+// double-count under content-identical re-saves).
+export function getBlockingFromShard(markerDir, file, newHashes) {
+  const map = loadRepetitionsForFile(markerDir, file);
   const blocking = [];
-  for (const entry of map.values()) {
-    if (entry.file === file && entry.count >= REPETITION_BLOCKING_THRESHOLD) {
-      blocking.push({ file: entry.file, hash: entry.hash, count: entry.count });
+  for (const h of newHashes) {
+    const e = map.get(h);
+    if (e && e.count >= REPETITION_BLOCKING_THRESHOLD) {
+      blocking.push({ file, hash: e.hash, count: e.count });
     }
   }
   return blocking;
+}
+
+// Update repetition state for a single file given the set of concern
+// hashes from the just-completed LIVE review. (Cache-hit path uses
+// `getBlockingFromShard` instead — read-only.) Returns blocking entries.
+export async function updateRepetitions(markerDir, file, newHashes) {
+  const map = loadRepetitionsForFile(markerDir, file);
+  const newSet = new Set(newHashes);
+  const now = new Date().toISOString();
+  // Drop prior entries absent from new review (assumed fixed);
+  // increment ones still flagged.
+  for (const [hash, entry] of [...map.entries()]) {
+    if (newSet.has(hash)) {
+      entry.count += 1;
+      entry.lastSeenAt = now;
+      newSet.delete(hash);
+    } else {
+      map.delete(hash);
+    }
+  }
+  // First-time-seen hashes
+  for (const hash of newSet) {
+    map.set(hash, { hash, count: 1, firstSeenAt: now, lastSeenAt: now });
+  }
+  await saveRepetitionsForFile(markerDir, file, map);
+  // Probabilistic TTL sweep — 5% per update amortizes O(N_files) cost
+  // without needing a dedicated SessionStart hook.
+  if (Math.random() < 0.05) {
+    sweepStaleRepetitions(markerDir).catch(() => {});
+  }
+  // Return entries at/over threshold
+  const blocking = [];
+  for (const entry of map.values()) {
+    if (entry.count >= REPETITION_BLOCKING_THRESHOLD) {
+      blocking.push({ file, hash: entry.hash, count: entry.count });
+    }
+  }
+  return blocking;
+}
+
+// Drop shard files with mtime older than REPETITIONS_TTL_MS. Closes
+// ADR-096 multi-review finding #2 (unbounded growth — entries leaked
+// for files never re-reviewed). Runs probabilistically from
+// updateRepetitions; best-effort, never throws.
+export async function sweepStaleRepetitions(markerDir) {
+  const root = repetitionsShardsRoot(markerDir);
+  try {
+    const files = await readdir(root);
+    const cutoff = Date.now() - REPETITIONS_TTL_MS;
+    for (const f of files) {
+      if (!f.endsWith(".json")) continue;
+      const full = join(root, f);
+      try {
+        const s = await stat(full);
+        if (s.mtimeMs < cutoff) await unlink(full);
+      } catch {
+        // skip unreadable / racing-unlink
+      }
+    }
+  } catch {
+    // shards dir doesn't exist yet — nothing to sweep
+  }
+}
+
+// Backward-compat shims for the v1 singleton API. Used by tests that
+// haven't migrated yet. New code should use the per-file shard helpers.
+export function loadRepetitions(markerDir) {
+  // v1 singleton is dead — return empty Map. Any v1 file is treated as
+  // stale and ignored. The TTL sweep will not touch it (different path)
+  // but it's small and harmless; documented as a known dangling artifact.
+  // Tests that exercised v1 semantics need to migrate to loadRepetitionsForFile.
+  void markerDir;
+  return new Map();
+}
+export async function saveRepetitions(markerDir, map) {
+  // v1 no-op. Documented as dead in ADR-097.
+  void markerDir;
+  void map;
 }

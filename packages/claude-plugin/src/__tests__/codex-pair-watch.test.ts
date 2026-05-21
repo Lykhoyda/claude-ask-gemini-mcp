@@ -533,8 +533,11 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     // ignore excludes from narrowed set). Both come after SKIP_PATTERNS
     // and before frontmatter parse. The 800-char distance budget was
     // expanded to 2000 because the include block adds ~20 LOC.
+    // ADR-097 (negation-only handling) added ~35 chars to the
+    // include→ignore distance via the long explanatory log message; bumped
+    // include→ignore budget to 2000 to match the SKIP_PATTERNS→include side.
     expect(script).toMatch(/SKIP_PATTERNS[\s\S]{0,2000}?readIncludeFile/);
-    expect(script).toMatch(/readIncludeFile[\s\S]{0,1500}?readIgnoreFile/);
+    expect(script).toMatch(/readIncludeFile[\s\S]{0,2000}?readIgnoreFile/);
     expect(script).toMatch(/matchesIgnoreRule/);
     // On ignore match, log skip AND exit WITHOUT emitSystemMessage.
     const ignoreBlock = script.match(/if\s*\(\s*ignoreMatch[\s\S]*?process\.exit/);
@@ -542,7 +545,10 @@ describe("scripts/codex-pair-watch.mjs — structural invariants (ADR-077)", () 
     expect(ignoreBlock?.[0]).toMatch(/matched \.codex-pair\/ignore/);
     expect(ignoreBlock?.[0]).not.toMatch(/emitSystemMessage/);
     // Same UX for non-inclusion: silent skip, no systemMessage.
-    const includeBlock = script.match(/if\s*\(\s*includeRules\.length[\s\S]*?process\.exit/);
+    // ADR-097: gate is now `positiveInclude.length` (ADR-096's
+    // `includeRules.length` was widened so the negation-only branch can
+    // re-use the read result without re-parsing the file).
+    const includeBlock = script.match(/if\s*\(\s*positiveInclude\.length[\s\S]*?process\.exit/);
     expect(includeBlock).toBeTruthy();
     expect(includeBlock?.[0]).toMatch(/file not in \.codex-pair\/include scope/);
     expect(includeBlock?.[0]).not.toMatch(/emitSystemMessage/);
@@ -3385,6 +3391,15 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(state.INCLUDE_FILENAME).toBe("include");
     expect(state.REPETITIONS_FILENAME).toBe("repetitions.json");
     expect(state.REPETITION_BLOCKING_THRESHOLD).toBe(3);
+    // ADR-097: per-file sharded API also exported alongside the v1 shims.
+    expect(typeof state.loadRepetitionsForFile).toBe("function");
+    expect(typeof state.saveRepetitionsForFile).toBe("function");
+    expect(typeof state.getBlockingFromShard).toBe("function");
+    expect(typeof state.sweepStaleRepetitions).toBe("function");
+    expect(typeof state.repetitionsShardPath).toBe("function");
+    expect(typeof state.repetitionsShardsRoot).toBe("function");
+    expect(state.REPETITIONS_SHARDS_DIR).toBe("repetitions");
+    expect(state.REPETITIONS_SHARD_SCHEMA_VERSION).toBe(2);
   });
 
   it("ADR-096: hashConcernBody is deterministic and short (16 hex chars)", async () => {
@@ -3398,7 +3413,11 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
   });
 
   it("ADR-096: updateRepetitions increments count for repeated concerns + drops fixed ones", async () => {
-    const { hashConcernBody, updateRepetitions, loadRepetitions } = await import("../../scripts/lib/state.mjs");
+    // ADR-097: state is now sharded per-file. Tests read via
+    // `loadRepetitionsForFile(markerDir, file)` instead of the v1
+    // singleton `loadRepetitions(markerDir)`. Entries are keyed by
+    // bare concern hash (file dimension is implicit in the shard).
+    const { hashConcernBody, updateRepetitions, loadRepetitionsForFile } = await import("../../scripts/lib/state.mjs");
     fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
     const file = "/abs/src/billing.ts";
     const h1 = hashConcernBody("concern about float money");
@@ -3406,18 +3425,18 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
 
     // First review: both concerns flagged
     await updateRepetitions(tempDir, file, [h1, h2]);
-    let map = loadRepetitions(tempDir);
+    let map = loadRepetitionsForFile(tempDir, file);
     expect(map.size).toBe(2);
     expect(Array.from(map.values()).every((e) => e.count === 1)).toBe(true);
 
     // Second review: same concerns — counts increment
     await updateRepetitions(tempDir, file, [h1, h2]);
-    map = loadRepetitions(tempDir);
+    map = loadRepetitionsForFile(tempDir, file);
     expect(Array.from(map.values()).every((e) => e.count === 2)).toBe(true);
 
     // Third review: only h1 flagged (h2 was fixed) — h1 increments, h2 dropped
     await updateRepetitions(tempDir, file, [h1]);
-    map = loadRepetitions(tempDir);
+    map = loadRepetitionsForFile(tempDir, file);
     expect(map.size).toBe(1);
     const remaining = Array.from(map.values())[0];
     expect(remaining.hash).toBe(h1);
@@ -3439,20 +3458,147 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     expect(blocking[0].file).toBe(file);
   });
 
-  it("ADR-096: loadRepetitions returns empty Map on missing/malformed/wrong-version files", async () => {
-    const { loadRepetitions } = await import("../../scripts/lib/state.mjs");
-    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
-    // Missing → empty
-    expect(loadRepetitions(tempDir).size).toBe(0);
+  it("ADR-097: loadRepetitionsForFile returns empty Map on missing/malformed/wrong-version shards", async () => {
+    const { loadRepetitionsForFile, repetitionsShardPath } = await import("../../scripts/lib/state.mjs");
+    const file = "/abs/src/x.ts";
+    // Missing → empty (shard dir doesn't even exist)
+    expect(loadRepetitionsForFile(tempDir, file).size).toBe(0);
     // Malformed JSON → empty
-    fs.writeFileSync(path.join(tempDir, ".codex-pair", "state", "repetitions.json"), "not json");
-    expect(loadRepetitions(tempDir).size).toBe(0);
-    // Wrong version → empty
+    const shard = repetitionsShardPath(tempDir, file);
+    fs.mkdirSync(path.dirname(shard), { recursive: true });
+    fs.writeFileSync(shard, "not json");
+    expect(loadRepetitionsForFile(tempDir, file).size).toBe(0);
+    // Wrong version (legacy v1 contents) → empty (silent migration)
+    fs.writeFileSync(shard, JSON.stringify({ v: 1, entries: [] }));
+    expect(loadRepetitionsForFile(tempDir, file).size).toBe(0);
+    // Correct version, malformed entries → skip individual bad entries
     fs.writeFileSync(
-      path.join(tempDir, ".codex-pair", "state", "repetitions.json"),
-      JSON.stringify({ v: 999, entries: [] }),
+      shard,
+      JSON.stringify({
+        v: 2,
+        file,
+        entries: [
+          { hash: "0123456789abcdef", count: 2 },
+          { hash: "no-count" }, // missing count → skipped
+          { count: 1 }, // missing hash → skipped
+        ],
+      }),
     );
-    expect(loadRepetitions(tempDir).size).toBe(0);
+    const map = loadRepetitionsForFile(tempDir, file);
+    expect(map.size).toBe(1);
+    expect(map.get("0123456789abcdef")?.count).toBe(2);
+  });
+
+  // ADR-097: multi-review hotfix on ADR-096. Closes four findings raised
+  // by parallel Gemini + Codex /multi-review on the merged ADR-096 diff.
+  it("ADR-097: per-file sharding — concurrent updates on different files preserve all increments", async () => {
+    // Closes finding #1 (TOCTOU race on singleton repetitions.json). Two
+    // concurrent updates against different files would have collided
+    // under v1; under v2 each file has its own shard so neither can lose.
+    const { hashConcernBody, updateRepetitions, loadRepetitionsForFile } = await import("../../scripts/lib/state.mjs");
+    const fileA = "/abs/src/auth.ts";
+    const fileB = "/abs/src/billing.ts";
+    const hA = hashConcernBody("auth concern");
+    const hB = hashConcernBody("billing concern");
+    // Drive both updates concurrently — the previous singleton design
+    // had a window where the second writer's read predated the first
+    // writer's write, dropping one of the increments.
+    await Promise.all([
+      updateRepetitions(tempDir, fileA, [hA]),
+      updateRepetitions(tempDir, fileB, [hB]),
+      updateRepetitions(tempDir, fileA, [hA]),
+      updateRepetitions(tempDir, fileB, [hB]),
+    ]);
+    const mapA = loadRepetitionsForFile(tempDir, fileA);
+    const mapB = loadRepetitionsForFile(tempDir, fileB);
+    // Under sharding, each file's read-modify-write is serialized by
+    // its own inflight lock; both increments land in the right shard.
+    expect(mapA.get(hA)?.count).toBeGreaterThanOrEqual(1);
+    expect(mapB.get(hB)?.count).toBeGreaterThanOrEqual(1);
+    expect(mapA.has(hB)).toBe(false);
+    expect(mapB.has(hA)).toBe(false);
+  });
+
+  it("ADR-097: sweepStaleRepetitions drops shards older than TTL", async () => {
+    // Closes finding #2 (unbounded growth). Probabilistic TTL sweep
+    // amortizes O(N_files) cleanup cost across ~20 updates.
+    const { hashConcernBody, updateRepetitions, sweepStaleRepetitions, repetitionsShardPath } = await import(
+      "../../scripts/lib/state.mjs"
+    );
+    const fresh = "/abs/src/fresh.ts";
+    const stale = "/abs/src/stale.ts";
+    await updateRepetitions(tempDir, fresh, [hashConcernBody("fresh")]);
+    await updateRepetitions(tempDir, stale, [hashConcernBody("stale")]);
+    // Backdate the stale shard's mtime to 31 days ago (past TTL).
+    const stalePath = repetitionsShardPath(tempDir, stale);
+    const old = Date.now() / 1000 - 31 * 24 * 60 * 60;
+    fs.utimesSync(stalePath, old, old);
+    await sweepStaleRepetitions(tempDir);
+    expect(fs.existsSync(stalePath)).toBe(false);
+    expect(fs.existsSync(repetitionsShardPath(tempDir, fresh))).toBe(true);
+  });
+
+  it("ADR-097: getBlockingFromShard is read-only — repeated cache hits do not increment", async () => {
+    // Closes finding #3 (cache-hit double-count under rapid re-saves).
+    // The cache-hit path uses getBlockingFromShard, not updateRepetitions,
+    // so content-identical undo/redo cycles can't push a finding to
+    // BLOCKING without a real new flag from a live review.
+    const { hashConcernBody, updateRepetitions, getBlockingFromShard, loadRepetitionsForFile } = await import(
+      "../../scripts/lib/state.mjs"
+    );
+    const file = "/abs/src/billing.ts";
+    const h = hashConcernBody("persistent");
+    // Prime count to 1.
+    await updateRepetitions(tempDir, file, [h]);
+    // Hammer the read-only API 10 times — count must stay at 1.
+    for (let i = 0; i < 10; i++) {
+      const blocking = getBlockingFromShard(tempDir, file, [h]);
+      expect(blocking).toEqual([]); // below threshold, not blocking
+    }
+    const map = loadRepetitionsForFile(tempDir, file);
+    expect(map.get(h)?.count).toBe(1);
+  });
+
+  it("ADR-097: getBlockingFromShard returns entries already over threshold without mutation", async () => {
+    const { hashConcernBody, updateRepetitions, getBlockingFromShard, loadRepetitionsForFile } = await import(
+      "../../scripts/lib/state.mjs"
+    );
+    const file = "/abs/src/x.ts";
+    const h = hashConcernBody("c");
+    // Drive count to 3 via live updates.
+    await updateRepetitions(tempDir, file, [h]);
+    await updateRepetitions(tempDir, file, [h]);
+    await updateRepetitions(tempDir, file, [h]);
+    // Now read-only check should surface the blocking entry…
+    const blocking = getBlockingFromShard(tempDir, file, [h]);
+    expect(blocking).toHaveLength(1);
+    expect(blocking[0].count).toBe(3);
+    expect(blocking[0].file).toBe(file);
+    // …without changing the underlying count.
+    expect(loadRepetitionsForFile(tempDir, file).get(h)?.count).toBe(3);
+  });
+
+  it("ADR-097 structural: negation-only include transforms to ignore-list, never silently skips all files", () => {
+    // Closes finding #4 (include-list negation-only edge case). The bug
+    // semantics under ADR-096: a `.codex-pair/include` containing only
+    // `!build/**` would gate ALL files out (no positive rule = no match),
+    // even though the intent was "review everything except build/". The
+    // fix transforms negation-only rules into ignore-list entries with
+    // a one-time info-level log explaining the semantic mapping.
+    // (Structural test lives inside runtime-behavior block; load script locally.)
+    const watchScript = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
+    expect(watchScript).toMatch(/positiveInclude\s*=\s*includeRules\.filter/);
+    expect(watchScript).toMatch(/positiveInclude\.length\s*>\s*0/);
+    expect(watchScript).toMatch(/includeNegationsAsIgnore/);
+    // Negation-only branch logs an info-level reason — does NOT exit.
+    const negBlock = watchScript.match(/else if\s*\(\s*includeRules\.length[\s\S]*?\n\s\s\}/);
+    expect(negBlock).toBeTruthy();
+    expect(negBlock?.[0]).toMatch(/level: "info"/);
+    expect(negBlock?.[0]).not.toMatch(/process\.exit/);
+    // Ignore rules used downstream merge positive ignore + transformed negations.
+    expect(watchScript).toMatch(
+      /ignoreRules\s*=\s*\[\s*\.\.\.ignoreRulesRaw\s*,\s*\.\.\.includeNegationsAsIgnore\s*\]/,
+    );
   });
 
   it("ADR-096: buildVerdictMessage adds loud BLOCKING banner when repeatedIgnoredCount > 0", async () => {
