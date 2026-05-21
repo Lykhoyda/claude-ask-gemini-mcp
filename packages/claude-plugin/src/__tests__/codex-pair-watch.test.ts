@@ -3127,4 +3127,239 @@ describe("scripts/codex-pair-watch.mjs — runtime behavior (no codex calls)", (
     for (const cb of listeners.error) cb(transportErr);
     await expect(p).rejects.toThrow(/ECONNRESET/);
   });
+
+  // Tier 3 Milestone 4 (M4) Integration Tests
+
+  it("M4 integration: codex-pair-watch.mjs dispatches broker via runCodexWithFallback (single path)", () => {
+    const hookSource = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
+    // Broker dispatch unified through runCodexWithFallback per /multi-review
+    // hotfix — both reviewers independently caught the duplicate inline
+    // branch in main() that bypassed fallback semantics + initialize handshake.
+    expect(hookSource).toMatch(/if\s*\(isBrokerEnabled\(markerDir\)\)/);
+    expect(hookSource).toMatch(/runWithBroker/);
+    expect(hookSource).toMatch(/submitReview/);
+    // main() must call runCodexWithFallback (not a duplicate inline branch).
+    // Pin that runCodexWithFallback is invoked from main()'s try block.
+    expect(hookSource).toMatch(/await runCodexWithFallback\(\{[\s\S]+?fallbackModel/);
+    // Explicit anti-regression on the duplicate-inline-dispatch bug:
+    // main() must NOT directly call connectWebSocket or createRpcClient.
+    // Those calls only live inside runWithBroker (called via runCodexWithFallback).
+    const mainBody = hookSource.match(/async function main\(\)[\s\S]+?\n\}/)?.[0] ?? "";
+    expect(mainBody).not.toMatch(/connectWebSocket\(/);
+    expect(mainBody).not.toMatch(/createRpcClient\(/);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Milestone 4: hook integration + isBrokerEnabled real check + broker-
+  // failure-vs-real-error discriminator.
+  // ─────────────────────────────────────────────────────────────────────
+
+  it("M4: isBrokerEnabled returns false when ASK_CODEX_BROKER is unset (master switch off)", async () => {
+    const { isBrokerEnabled } = await import("../../scripts/lib/broker.mjs");
+    const orig = process.env.ASK_CODEX_BROKER;
+    try {
+      delete process.env.ASK_CODEX_BROKER;
+      expect(isBrokerEnabled(tempDir)).toBe(false);
+    } finally {
+      if (orig === undefined) delete process.env.ASK_CODEX_BROKER;
+      else process.env.ASK_CODEX_BROKER = orig;
+    }
+  });
+
+  it("M4: isBrokerEnabled returns false when ASK_CODEX_BROKER=1 but no descriptor exists", async () => {
+    const { isBrokerEnabled } = await import("../../scripts/lib/broker.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    const orig = process.env.ASK_CODEX_BROKER;
+    try {
+      process.env.ASK_CODEX_BROKER = "1";
+      expect(isBrokerEnabled(tempDir)).toBe(false);
+    } finally {
+      if (orig === undefined) delete process.env.ASK_CODEX_BROKER;
+      else process.env.ASK_CODEX_BROKER = orig;
+    }
+  });
+
+  it("M4: isBrokerEnabled returns false when descriptor has wrong protocolVersion", async () => {
+    const { isBrokerEnabled } = await import("../../scripts/lib/broker.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempDir, ".codex-pair", "state", "broker.json"),
+      JSON.stringify({ pid: process.pid, transportUrl: "unix:///tmp/x.sock", protocolVersion: "vWRONG" }),
+    );
+    const orig = process.env.ASK_CODEX_BROKER;
+    try {
+      process.env.ASK_CODEX_BROKER = "1";
+      expect(isBrokerEnabled(tempDir)).toBe(false);
+    } finally {
+      if (orig === undefined) delete process.env.ASK_CODEX_BROKER;
+      else process.env.ASK_CODEX_BROKER = orig;
+    }
+  });
+
+  it("M4: isBrokerEnabled returns false when descriptor pid is dead", async () => {
+    const { isBrokerEnabled } = await import("../../scripts/lib/broker.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempDir, ".codex-pair", "state", "broker.json"),
+      // pid 999999 — overwhelmingly unlikely to be alive
+      JSON.stringify({ pid: 999999, transportUrl: "unix:///tmp/x.sock", protocolVersion: "v2" }),
+    );
+    const orig = process.env.ASK_CODEX_BROKER;
+    try {
+      process.env.ASK_CODEX_BROKER = "1";
+      expect(isBrokerEnabled(tempDir)).toBe(false);
+    } finally {
+      if (orig === undefined) delete process.env.ASK_CODEX_BROKER;
+      else process.env.ASK_CODEX_BROKER = orig;
+    }
+  });
+
+  it("M4: isBrokerEnabled returns TRUE when all gates pass (env, descriptor, protocol, pid)", async () => {
+    const { isBrokerEnabled } = await import("../../scripts/lib/broker.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempDir, ".codex-pair", "state", "broker.json"),
+      JSON.stringify({ pid: process.pid, transportUrl: "unix:///tmp/x.sock", protocolVersion: "v2" }),
+    );
+    const orig = process.env.ASK_CODEX_BROKER;
+    try {
+      process.env.ASK_CODEX_BROKER = "1";
+      expect(isBrokerEnabled(tempDir)).toBe(true);
+    } finally {
+      if (orig === undefined) delete process.env.ASK_CODEX_BROKER;
+      else process.env.ASK_CODEX_BROKER = orig;
+    }
+  });
+
+  it("M4: readBrokerState returns the actual descriptor (was null stub in M2)", async () => {
+    const { readBrokerState } = await import("../../scripts/lib/broker.mjs");
+    fs.mkdirSync(path.join(tempDir, ".codex-pair", "state"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tempDir, ".codex-pair", "state", "broker.json"),
+      JSON.stringify({ pid: 12345, transportUrl: "unix:///tmp/x.sock", protocolVersion: "v2" }),
+    );
+    const state = readBrokerState(tempDir);
+    expect(state).not.toBeNull();
+    expect(state?.pid).toBe(12345);
+    expect(state?.transportUrl).toBe("unix:///tmp/x.sock");
+  });
+
+  it("M4: submitReview thread_start failure sets err.brokerFailure (hook will fall back)", async () => {
+    const { submitReview } = await import("../../scripts/lib/broker.mjs");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockRpc: any = {
+      request: async (method: string) => {
+        if (method === "thread/start")
+          return {
+            thread: {
+              /* missing id */
+            },
+          };
+        return {};
+      },
+      waitFor: async () => ({ method: "turn/completed", params: {} }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockConn: any = { close: () => {}, on: () => {}, destroyed: false };
+    let caught: Error | null = null;
+    try {
+      await submitReview({
+        rpc: mockRpc,
+        connection: mockConn,
+        cwd: "/tmp",
+        baseInstructions: "ctx",
+        prompt: "x",
+        model: "gpt-5.5",
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.brokerFailure).toBe(true);
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.brokerPhase).toBe("thread_start");
+  });
+
+  it("M4: submitReview turn.status:failed does NOT set brokerFailure (real codex result, not broker outage)", async () => {
+    const { submitReview } = await import("../../scripts/lib/broker.mjs");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockRpc: any = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "T1" } };
+        if (method === "turn/start") return { turn: { id: "U1" } };
+        return {};
+      },
+      waitFor: async () => ({
+        method: "turn/completed",
+        params: { threadId: "T1", turn: { id: "U1", status: "failed", error: { message: "model error" }, items: [] } },
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockConn: any = { close: () => {}, on: () => {}, destroyed: false };
+    let caught: Error | null = null;
+    try {
+      await submitReview({
+        rpc: mockRpc,
+        connection: mockConn,
+        cwd: "/tmp",
+        baseInstructions: "ctx",
+        prompt: "x",
+        model: "gpt-5.5",
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    // turn.status:failed is a REAL codex result — must NOT fall back
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.brokerFailure).toBeUndefined();
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.verdict).toBe("error");
+  });
+
+  it("M4: submitReview missing-agentMessage sets brokerFailure (protocol-layer failure)", async () => {
+    const { submitReview } = await import("../../scripts/lib/broker.mjs");
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockRpc: any = {
+      request: async (method: string) => {
+        if (method === "thread/start") return { thread: { id: "T1" } };
+        if (method === "turn/start") return { turn: { id: "U1" } };
+        return {};
+      },
+      waitFor: async () => ({
+        method: "turn/completed",
+        params: { threadId: "T1", turn: { id: "U1", status: "completed", items: [] } },
+      }),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: test mock
+    const mockConn: any = { close: () => {}, on: () => {}, destroyed: false };
+    let caught: Error | null = null;
+    try {
+      await submitReview({
+        rpc: mockRpc,
+        connection: mockConn,
+        cwd: "/tmp",
+        baseInstructions: "ctx",
+        prompt: "x",
+        model: "gpt-5.5",
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.brokerFailure).toBe(true);
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.brokerPhase).toBe("protocol");
+    // biome-ignore lint/suspicious/noExplicitAny: structured marker
+    expect((caught as any)?.verdict).toBe("parse_failed");
+  });
+
+  it("M4 structural: codex-pair-watch.mjs wires the broker integration", () => {
+    const watch = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "codex-pair-watch.mjs"), "utf-8");
+    expect(watch).toMatch(/import.*isBrokerEnabled.*from\s+["']\.\/lib\/broker\.mjs["']/);
+    expect(watch).toMatch(/runWithBroker/);
+    expect(watch).toMatch(/isBrokerEnabled\(markerDir\)/);
+    expect(watch).toMatch(/err\?\.brokerFailure/);
+    // Cache integration: broker path must NOT add a discriminator to the cache key
+    expect(watch).not.toMatch(/cacheKey.*broker|broker.*cacheKey/);
+  });
 });

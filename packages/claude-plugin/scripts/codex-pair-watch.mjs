@@ -34,6 +34,12 @@ import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { IS_WINDOWS, terminateProcessTree } from "./lib/process.mjs";
+// M4: broker integration. Importing initializeBroker + isBrokerEnabled +
+// submitReview from broker.mjs transitively pulls in broker-transport,
+// broker-rpc, broker-lifecycle. ESM-static cost is paid on every hook
+// fire, but isBrokerEnabled returns false fast when ASK_CODEX_BROKER
+// isn't set, so the per-edit fast path is unaffected.
+import { initializeBroker, isBrokerEnabled, readBrokerState, submitReview } from "./lib/broker.mjs";
 import { buildReviewPrompt } from "./lib/prompt.mjs";
 import {
   buildVerdictMessage,
@@ -648,7 +654,108 @@ async function spawnCodexWithRetry({ prompt, model, timeoutMs, markerDir }) {
   }
 }
 
+// M4: cached plugin clientInfo for broker handshake. Built once per
+// process (per ADR-095, plugin version detection used to silently always
+// return "unknown" before the ESM fix).
+let _cachedBrokerClientInfo = null;
+function brokerClientInfo() {
+  if (_cachedBrokerClientInfo) return _cachedBrokerClientInfo;
+  let v = "unknown";
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const manifest = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf-8"));
+    v = manifest?.version || "unknown";
+  } catch {
+    // best-effort
+  }
+  _cachedBrokerClientInfo = { name: "codex-pair", title: `codex-pair plugin v${v}`, version: v };
+  return _cachedBrokerClientInfo;
+}
+
+// M4: broker-path wrapper. Opens an RPC connection to the running
+// `codex app-server`, calls submitReview, closes the connection.
+// Connect/initialize failures get tagged with `err.brokerFailure = true`
+// so runCodexWithFallback falls back to spawnCodex silently (ADR-077).
+// Wall-clock budget is the same as spawnCodex's `timeoutMs`.
+async function runWithBroker({ prompt, timeoutMs, model, markerDir }) {
+  const state = readBrokerState(markerDir);
+  if (!state) {
+    const err = new Error("runWithBroker: no broker descriptor");
+    err.brokerFailure = true;
+    err.brokerPhase = "connect";
+    throw err;
+  }
+  let connection = null;
+  let rpc = null;
+  try {
+    // Tight handshake budget — broker should be already running; if it
+    // takes more than 2s to handshake, treat as broken and fall back
+    // rather than blocking the hook (M4 brainstorm Risk #3).
+    const init = await initializeBroker(state.transportUrl, brokerClientInfo(), {
+      handshakeTimeoutMs: 2000,
+      initializeTimeoutMs: 2000,
+    });
+    connection = init.connection;
+    rpc = init.rpc;
+  } catch (err) {
+    if (err && typeof err === "object") {
+      err.brokerFailure = true;
+      err.brokerPhase = err.brokerPhase || "connect";
+    }
+    throw err;
+  }
+  try {
+    return await submitReview({
+      connection,
+      rpc,
+      cwd: markerDir,
+      // baseInstructions is folded into `prompt` by buildReviewPrompt
+      // already; passing empty string keeps the codex API happy.
+      baseInstructions: "",
+      prompt,
+      model,
+      timeoutMs,
+    });
+  } finally {
+    if (connection) {
+      try {
+        connection.close(1000, "review done");
+      } catch {
+        // best-effort
+      }
+    }
+  }
+}
+
 async function runCodexWithFallback({ prompt, timeoutMs, model, fallbackModel, markerDir }) {
+  // M4: try the broker first if enabled. On err.brokerFailure (transport,
+  // handshake, parse-layer failure) fall through to per-edit spawnCodex
+  // silently per ADR-077. On other errors (verdict:"error" from a real
+  // codex result, verdict:"timeout") propagate as-is — retrying via
+  // spawnCodex would double the spend on cases where the model
+  // legitimately couldn't produce a verdict.
+  if (isBrokerEnabled(markerDir)) {
+    try {
+      return {
+        response: await runWithBroker({ prompt, model, timeoutMs, markerDir }),
+        fellBack: false,
+        viaBroker: true,
+      };
+    } catch (err) {
+      if (!err?.brokerFailure) throw err;
+      // brokerFailure → silent fall-through to spawnCodex path below.
+      // Append a log entry so dogfooders can audit broker-mode regressions.
+      try {
+        await appendLog(markerDir, {
+          timestamp: new Date().toISOString(),
+          verdict: "broker_fallback",
+          reason: `${err.brokerPhase || "unknown"}: ${err.message ?? String(err)}`,
+        });
+      } catch {
+        // best-effort; logging failure must never break the hook
+      }
+    }
+  }
   try {
     return {
       response: await spawnCodexWithRetry({ prompt, model, timeoutMs, markerDir }),
@@ -871,6 +978,12 @@ async function main() {
   let response;
   let fellBack = false;
   try {
+    // M4 multi-review hotfix: dispatch unified through runCodexWithFallback
+    // for BOTH broker and spawn modes. Previous duplicate inline branch
+    // bypassed runWithBroker's brokerFailure-fallback semantics + missed
+    // initialize handshake + missed quota fallback. Both /multi-review
+    // reviewers (Codex 98% + Claude 98%) caught this independently —
+    // a duplicate dispatch path I auto-completed without realizing.
     const result = await runCodexWithFallback({
       prompt,
       timeoutMs: config.timeoutMs,
